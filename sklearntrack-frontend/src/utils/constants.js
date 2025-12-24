@@ -23,9 +23,39 @@ export const API_ENDPOINTS = {
   // Notes
   NOTES: '/api/notes/',
   NOTE_DETAIL: (id) => `/api/notes/${id}/`,
-  NOTE_HISTORY: (id) => `/api/notes/${id}/history/`,
+  NOTE_HISTORY: (id) => `/api/notes/${id}/versions/`,
+  NOTE_RESTORE_VERSION: (id) => `/api/notes/${id}/restore_version/`,
+  NOTE_DUPLICATE: (id) => `/api/notes/${id}/duplicate/`,
+  NOTE_AI_ACTION: '/api/notes/ai_action/',
+  NOTE_APPROVE_AI: '/api/notes/approve_ai_content/',
+  NOTE_IMPORT_YOUTUBE: '/api/notes/import_youtube/',
+  NOTE_EXPORT_PDF: (id) => `/api/notes/${id}/export_pdf/`,
+  NOTE_DAILY: '/api/notes/daily_notes/',
+
+  // Code Snippets
   SNIPPETS: '/api/snippets/',
   SNIPPET_DETAIL: (id) => `/api/snippets/${id}/`,
+
+  // Sources
+  SOURCES: '/api/sources/',
+  SOURCE_DETAIL: (id) => `/api/sources/${id}/`,
+  SOURCE_AUTO_FETCH: '/api/sources/auto_fetch/',
+
+  // Templates
+  TEMPLATES: '/api/templates/',
+  TEMPLATE_DETAIL: (id) => `/api/templates/${id}/`,
+  TEMPLATE_USE: (id) => `/api/templates/${id}/use_template/`,
+
+  // Reports
+  REPORTS: '/api/reports/',
+  REPORT_DETAIL: (id) => `/api/reports/${id}/`,
+  REPORT_GENERATE_TODAY: '/api/reports/generate_today/',
+
+  // Shares
+  SHARES: '/api/shares/',
+  SHARE_DETAIL: (id) => `/api/shares/${id}/`,
+  SHARE_CREATE_PUBLIC: '/api/shares/create_public_share/',
+};
   
   // Roadmaps
   ROADMAPS: '/api/roadmaps/',
