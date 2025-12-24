@@ -14,10 +14,10 @@ import NoteEditor from '@/components/notes/NoteEditor';
 import NoteList from '@/components/notes/NoteList';
 import NoteViewer from '@/components/notes/NoteViewer';
 import AIActionsPanel from '@/components/notes/AIActionsPanel';
-// import SourceManager from '@/components/notes/SourceManager';
-// import CodeSnippetManager from '@/components/notes/CodeSnippetManager';
-// import VersionHistory from '@/components/notes/VersionHistory';
-// import YouTubeImporter from '@/components/notes/YouTubeImporter';
+import SourceManager from '@/components/notes/SourceManager';
+import CodeSnippetManager from '@/components/notes/CodeSnippetManager';
+import VersionHistory from '@/components/notes/VersionHistory';
+import YouTubeImporter from '@/components/notes/YouTubeImporter';
 import { noteService } from '@/services/note.service';
 import toast from 'react-hot-toast';
 
