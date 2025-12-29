@@ -13,4 +13,3 @@ urlpatterns = [
     path('logout/', AuthViewSet.as_view({'post': 'logout'}), name='logout'),
     path('', include(router.urls)),
 ]
-

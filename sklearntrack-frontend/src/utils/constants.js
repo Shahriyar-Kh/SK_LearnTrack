@@ -1,8 +1,7 @@
 // FILE: src/utils/constants.js
 // ============================================================================
 
-export const API_BASE_URL =
-  import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
+export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
 
 export const API_ENDPOINTS = {
   // Auth
@@ -12,7 +11,7 @@ export const API_ENDPOINTS = {
   LOGOUT: '/api/auth/logout/',
   ME: '/api/auth/users/me/',
   UPDATE_PROFILE: '/api/auth/users/update_profile/',
-
+  
   // Courses
   COURSES: '/api/courses/',
   COURSE_DETAIL: (slug) => `/api/courses/${slug}/`,
@@ -20,8 +19,8 @@ export const API_ENDPOINTS = {
   COURSE_PROGRESS: (slug) => `/api/courses/${slug}/progress/`,
   ENROLLMENTS: '/api/courses/enrollments/',
   PERSONAL_COURSES: '/api/courses/personal/',
-
-  // Notes
+  
+    // Notes
   NOTES: '/api/notes/',
   NOTE_DETAIL: (id) => `/api/notes/${id}/`,
   NOTE_HISTORY: (id) => `/api/notes/${id}/versions/`,
@@ -56,13 +55,13 @@ export const API_ENDPOINTS = {
   SHARES: '/api/shares/',
   SHARE_DETAIL: (id) => `/api/shares/${id}/`,
   SHARE_CREATE_PUBLIC: '/api/shares/create_public_share/',
-
+  
   // Roadmaps
   ROADMAPS: '/api/roadmaps/',
   ROADMAP_DETAIL: (id) => `/api/roadmaps/${id}/`,
   MILESTONES: '/api/roadmaps/milestones/',
   TASKS: '/api/roadmaps/tasks/',
-
+  
   // Analytics
   DASHBOARD: '/api/analytics/dashboard/',
   STUDY_HISTORY: '/api/analytics/study-history/',

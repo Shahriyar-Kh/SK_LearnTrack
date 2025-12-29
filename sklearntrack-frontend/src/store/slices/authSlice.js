@@ -9,10 +9,10 @@ export const login = createAsyncThunk(
   'auth/login',
   async ({ email, password }, { rejectWithValue }) => {
     try {
-      const user = await authService.login(email, password);
-      return user;
+      const data = await authService.login(email, password);
+      return data;
     } catch (error) {
-      return rejectWithValue(error.response?.data || 'Login failed');
+      return rejectWithValue(error);
     }
   }
 );
@@ -22,9 +22,9 @@ export const register = createAsyncThunk(
   async (userData, { rejectWithValue }) => {
     try {
       const data = await authService.register(userData);
-      return data.user;
+      return data;
     } catch (error) {
-      return rejectWithValue(error.response?.data || 'Registration failed');
+      return rejectWithValue(error);
     }
   }
 );
@@ -33,9 +33,16 @@ export const logout = createAsyncThunk('auth/logout', async () => {
   await authService.logout();
 });
 
-export const getCurrentUser = createAsyncThunk('auth/getCurrentUser', async () => {
-  return await authService.getCurrentUser();
-});
+export const getCurrentUser = createAsyncThunk(
+  'auth/getCurrentUser', 
+  async (_, { rejectWithValue }) => {
+    try {
+      return await authService.getCurrentUser();
+    } catch (error) {
+      return rejectWithValue(error);
+    }
+  }
+);
 
 // Initial state
 const initialState = {
@@ -43,6 +50,7 @@ const initialState = {
   isAuthenticated: authService.isAuthenticated(),
   loading: false,
   error: null,
+  redirect: authService.getRedirectUrl(),
 };
 
 // Slice
@@ -52,6 +60,9 @@ const authSlice = createSlice({
   reducers: {
     clearError: (state) => {
       state.error = null;
+    },
+    setRedirect: (state, action) => {
+      state.redirect = action.payload;
     },
   },
   extraReducers: (builder) => {
@@ -64,11 +75,13 @@ const authSlice = createSlice({
       .addCase(login.fulfilled, (state, action) => {
         state.loading = false;
         state.isAuthenticated = true;
-        state.user = action.payload;
+        state.user = action.payload.user;
+        state.redirect = action.payload.redirect || '/dashboard';
       })
       .addCase(login.rejected, (state, action) => {
         state.loading = false;
         state.error = action.payload;
+        state.isAuthenticated = false;
       })
       // Register
       .addCase(register.pending, (state) => {
@@ -78,23 +91,35 @@ const authSlice = createSlice({
       .addCase(register.fulfilled, (state, action) => {
         state.loading = false;
         state.isAuthenticated = true;
-        state.user = action.payload;
+        state.user = action.payload.user;
+        state.redirect = action.payload.redirect || '/dashboard';
       })
       .addCase(register.rejected, (state, action) => {
         state.loading = false;
         state.error = action.payload;
+        state.isAuthenticated = false;
       })
       // Logout
+      .addCase(logout.pending, (state) => {
+        state.loading = true;
+      })
       .addCase(logout.fulfilled, (state) => {
+        state.loading = false;
         state.isAuthenticated = false;
         state.user = null;
+        state.redirect = '/login';
       })
       // Get current user
       .addCase(getCurrentUser.fulfilled, (state, action) => {
         state.user = action.payload;
+        state.isAuthenticated = true;
+      })
+      .addCase(getCurrentUser.rejected, (state) => {
+        state.user = null;
+        state.isAuthenticated = false;
       });
   },
 });
 
-export const { clearError } = authSlice.actions;
+export const { clearError, setRedirect } = authSlice.actions;
 export default authSlice.reducer;

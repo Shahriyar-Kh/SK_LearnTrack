@@ -7,29 +7,46 @@ import { API_ENDPOINTS } from '@/utils/constants';
 export const authService = {
   // Register new user
   register: async (userData) => {
-    const response = await api.post(API_ENDPOINTS.REGISTER, userData);
-    if (response.data.tokens) {
-      localStorage.setItem('accessToken', response.data.tokens.access);
-      localStorage.setItem('refreshToken', response.data.tokens.refresh);
-      localStorage.setItem('user', JSON.stringify(response.data.user));
+    try {
+      console.log('Registration request:', userData);
+      const response = await api.post(API_ENDPOINTS.REGISTER, userData);
+      console.log('Registration response:', response.data);
+      
+      if (response.data.tokens) {
+        localStorage.setItem('accessToken', response.data.tokens.access);
+        localStorage.setItem('refreshToken', response.data.tokens.refresh);
+        localStorage.setItem('user', JSON.stringify(response.data.user));
+      }
+      
+      return response.data;
+    } catch (error) {
+      console.error('Registration error:', error.response?.data || error);
+      throw error.response?.data || { detail: 'Registration failed' };
     }
-    return response.data;
   },
 
   // Login user
   login: async (email, password) => {
-    const response = await api.post(API_ENDPOINTS.LOGIN, { email, password });
-    if (response.data.access) {
-      localStorage.setItem('accessToken', response.data.access);
-      localStorage.setItem('refreshToken', response.data.refresh);
+    try {
+      console.log('Login request for:', email);
+      const response = await api.post(API_ENDPOINTS.LOGIN, { 
+        email: email.toLowerCase().trim(), 
+        password 
+      });
+      console.log('Login response:', response.data);
       
-      // Get user details
-      const userResponse = await api.get(API_ENDPOINTS.ME);
-      localStorage.setItem('user', JSON.stringify(userResponse.data));
+      if (response.data.access) {
+        localStorage.setItem('accessToken', response.data.access);
+        localStorage.setItem('refreshToken', response.data.refresh);
+        localStorage.setItem('user', JSON.stringify(response.data.user));
+        localStorage.setItem('redirect', response.data.redirect || '/dashboard');
+      }
       
-      return userResponse.data;
+      return response.data;
+    } catch (error) {
+      console.error('Login error:', error.response?.data || error);
+      throw error.response?.data || { detail: 'Login failed' };
     }
-    return response.data;
   },
 
   // Logout user
@@ -45,20 +62,31 @@ export const authService = {
       localStorage.removeItem('accessToken');
       localStorage.removeItem('refreshToken');
       localStorage.removeItem('user');
+      localStorage.removeItem('redirect');
     }
   },
 
   // Get current user
   getCurrentUser: async () => {
-    const response = await api.get(API_ENDPOINTS.ME);
-    localStorage.setItem('user', JSON.stringify(response.data));
-    return response.data;
+    try {
+      const response = await api.get(API_ENDPOINTS.ME);
+      localStorage.setItem('user', JSON.stringify(response.data));
+      return response.data;
+    } catch (error) {
+      console.error('Get current user error:', error);
+      throw error;
+    }
   },
 
   // Update profile
   updateProfile: async (profileData) => {
-    const response = await api.put(API_ENDPOINTS.UPDATE_PROFILE, profileData);
-    return response.data;
+    try {
+      const response = await api.put(API_ENDPOINTS.UPDATE_PROFILE, profileData);
+      return response.data;
+    } catch (error) {
+      console.error('Update profile error:', error);
+      throw error;
+    }
   },
 
   // Get stored user
@@ -70,5 +98,10 @@ export const authService = {
   // Check if authenticated
   isAuthenticated: () => {
     return !!localStorage.getItem('accessToken');
+  },
+
+  // Get redirect URL
+  getRedirectUrl: () => {
+    return localStorage.getItem('redirect') || '/dashboard';
   },
 };
