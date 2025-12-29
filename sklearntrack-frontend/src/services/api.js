@@ -12,10 +12,35 @@ const api = axios.create({
   },
 });
 
+// Helper functions for token management
+const getAccessToken = () => {
+  // Support both 'token' and 'accessToken' for backward compatibility
+  return localStorage.getItem('token') || localStorage.getItem('accessToken');
+};
+
+const getRefreshToken = () => {
+  return localStorage.getItem('refreshToken');
+};
+
+const setTokens = (access, refresh) => {
+  localStorage.setItem('token', access);
+  localStorage.setItem('accessToken', access); // Keep both for compatibility
+  if (refresh) {
+    localStorage.setItem('refreshToken', refresh);
+  }
+};
+
+const clearTokens = () => {
+  localStorage.removeItem('token');
+  localStorage.removeItem('accessToken');
+  localStorage.removeItem('refreshToken');
+  localStorage.removeItem('user');
+};
+
 // Request interceptor - Add auth token
 api.interceptors.request.use(
   (config) => {
-    const token = localStorage.getItem('accessToken');
+    const token = getAccessToken();
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
     }
@@ -27,6 +52,21 @@ api.interceptors.request.use(
 );
 
 // Response interceptor - Handle token refresh
+let isRefreshing = false;
+let failedQueue = [];
+
+const processQueue = (error, token = null) => {
+  failedQueue.forEach(prom => {
+    if (error) {
+      prom.reject(error);
+    } else {
+      prom.resolve(token);
+    }
+  });
+  
+  failedQueue = [];
+};
+
 api.interceptors.response.use(
   (response) => response,
   async (error) => {
@@ -34,12 +74,27 @@ api.interceptors.response.use(
 
     // If error is 401 and we haven't tried to refresh yet
     if (error.response?.status === 401 && !originalRequest._retry) {
+      if (isRefreshing) {
+        // If already refreshing, queue this request
+        return new Promise((resolve, reject) => {
+          failedQueue.push({ resolve, reject });
+        })
+          .then(token => {
+            originalRequest.headers.Authorization = `Bearer ${token}`;
+            return api(originalRequest);
+          })
+          .catch(err => {
+            return Promise.reject(err);
+          });
+      }
+
       originalRequest._retry = true;
+      isRefreshing = true;
 
       try {
-        const refreshToken = localStorage.getItem('refreshToken');
+        const refreshToken = getRefreshToken();
         if (!refreshToken) {
-          throw new Error('No refresh token');
+          throw new Error('No refresh token available');
         }
 
         // Try to refresh the token
@@ -47,18 +102,30 @@ api.interceptors.response.use(
           refresh: refreshToken,
         });
 
-        const { access } = response.data;
-        localStorage.setItem('accessToken', access);
+        const { access, refresh: newRefresh } = response.data;
+        setTokens(access, newRefresh || refreshToken);
+
+        // Update the authorization header
+        api.defaults.headers.common['Authorization'] = `Bearer ${access}`;
+        originalRequest.headers.Authorization = `Bearer ${access}`;
+
+        processQueue(null, access);
+        isRefreshing = false;
 
         // Retry the original request with new token
-        originalRequest.headers.Authorization = `Bearer ${access}`;
         return api(originalRequest);
       } catch (refreshError) {
+        processQueue(refreshError, null);
+        isRefreshing = false;
+
         // Refresh failed - logout user
-        localStorage.removeItem('accessToken');
-        localStorage.removeItem('refreshToken');
-        localStorage.removeItem('user');
-        window.location.href = '/login';
+        clearTokens();
+        
+        // Redirect to login page
+        if (window.location.pathname !== '/login') {
+          window.location.href = '/login';
+        }
+        
         return Promise.reject(refreshError);
       }
     }
@@ -69,3 +136,5 @@ api.interceptors.response.use(
 
 export default api;
 
+// Export helper functions if needed elsewhere
+export { getAccessToken, getRefreshToken, setTokens, clearTokens };

@@ -4,31 +4,35 @@
 from rest_framework import viewsets, permissions, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
-from django.utils import timezone
-from django.db.models import Q, Count
-from datetime import date, timedelta
+from django.db import transaction
+from django.db.models import Q, Count, Prefetch, Max
+from django.db.utils import ProgrammingError
+from django.core.files.storage import default_storage
+from django.core.files.base import ContentFile
+from django.conf import settings
+import os
+from uuid import uuid4
 
 from .models import (
-    Note, NoteVersion, CodeSnippet, NoteSource,
-    NoteTemplate, DailyNoteReport, AIGeneratedNote,
-    YouTubeTranscript, NoteShare
+    Note, Chapter, ChapterTopic, TopicExplanation,
+    TopicCodeSnippet, TopicSource, NoteVersion,
+    AIGeneratedContent, NoteShare
 )
 from .serializers import (
-    NoteListSerializer, NoteDetailSerializer, NoteVersionSerializer,
-    CodeSnippetSerializer, NoteSourceSerializer, NoteTemplateSerializer,
-    DailyNoteReportSerializer, AIGeneratedNoteSerializer,
-    YouTubeTranscriptSerializer, NoteShareSerializer,
-    AIActionSerializer, YouTubeImportSerializer, ExportNoteSerializer
+    NoteListSerializer, NoteDetailSerializer, ChapterSerializer,
+    ChapterTopicSerializer, NoteVersionSerializer, AIGeneratedContentSerializer,
+    NoteShareSerializer, AIActionSerializer, TopicCreateSerializer,
+    TopicUpdateSerializer
 )
 from .utils import (
-    generate_ai_summary, generate_ai_expansion, generate_ai_rewrite,
-    fetch_youtube_transcript, generate_notes_from_transcript,
-    export_note_to_pdf, generate_daily_report_pdf
+    generate_ai_explanation, generate_ai_code,
+    improve_explanation, summarize_explanation,
+    export_note_to_pdf
 )
 
 
 class NoteViewSet(viewsets.ModelViewSet):
-    """Enhanced Note management with AI and export features"""
+    """Note CRUD with chapters and topics"""
     
     permission_classes = [permissions.IsAuthenticated]
     
@@ -37,9 +41,56 @@ class NoteViewSet(viewsets.ModelViewSet):
             return NoteListSerializer
         return NoteDetailSerializer
     
+    def create(self, request, *args, **kwargs):
+        """Create note with unique title validation"""
+        title = request.data.get('title', '').strip()
+        
+        if not title:
+            return Response(
+                {'error': 'Note title is required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Check if note with same title exists for this user
+        existing_note = Note.objects.filter(
+            user=request.user,
+            title__iexact=title
+        ).first()
+        
+        if existing_note:
+            return Response(
+                {'error': f'A note with the title "{title}" already exists. Please choose a different name.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        return super().create(request, *args, **kwargs)
+    
+    def update(self, request, *args, **kwargs):
+        """Update note with unique title validation"""
+        title = request.data.get('title', '').strip()
+        note = self.get_object()
+        
+        if title and title != note.title:
+            # Check if another note with same title exists for this user
+            existing_note = Note.objects.filter(
+                user=request.user,
+                title__iexact=title
+            ).exclude(id=note.id).first()
+            
+            if existing_note:
+                return Response(
+                    {'error': f'A note with the title "{title}" already exists. Please choose a different name.'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+        
+        return super().update(request, *args, **kwargs)
+    
     def get_queryset(self):
         queryset = Note.objects.filter(user=self.request.user).prefetch_related(
-            'sources', 'code_snippets'
+            Prefetch('chapters', queryset=Chapter.objects.order_by('order')),
+            Prefetch('chapters__topics', queryset=ChapterTopic.objects.order_by('order').select_related(
+                'explanation', 'code_snippet', 'source'
+            ))
         )
         
         # Filters
@@ -63,19 +114,91 @@ class NoteViewSet(viewsets.ModelViewSet):
         if search:
             queryset = queryset.filter(
                 Q(title__icontains=search) | 
-                Q(content__icontains=search) |
-                Q(tags__contains=[search])
-            )
-        
-        # Date range
-        start_date = self.request.query_params.get('start_date')
-        end_date = self.request.query_params.get('end_date')
-        if start_date:
-            queryset = queryset.filter(created_at__gte=start_date)
-        if end_date:
-            queryset = queryset.filter(created_at__lte=end_date)
+                Q(tags__contains=[search]) |
+                Q(chapters__title__icontains=search) |
+                Q(chapters__topics__name__icontains=search)
+            ).distinct()
         
         return queryset.order_by('-updated_at')
+    
+    @action(detail=True, methods=['get'])
+    def structure(self, request, pk=None):
+        """Get full note structure with all nested data"""
+        note = self.get_object()
+        serializer = NoteDetailSerializer(note)
+        return Response(serializer.data)
+    
+    @action(detail=False, methods=['post'])
+    def upload_image(self, request):
+        """Upload image for use in note explanations"""
+        if 'image' not in request.FILES:
+            return Response(
+                {'error': 'No image file provided'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        image_file = request.FILES['image']
+        
+        # Validate file type
+        allowed_types = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp']
+        if image_file.content_type not in allowed_types:
+            return Response(
+                {'error': 'Invalid file type. Only images (JPEG, PNG, GIF, WebP) are allowed.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Validate file size (max 5MB)
+        if image_file.size > 5 * 1024 * 1024:
+            return Response(
+                {'error': 'File size too large. Maximum size is 5MB.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Generate unique filename
+        file_ext = os.path.splitext(image_file.name)[1]
+        filename = f"notes/images/{uuid4()}{file_ext}"
+        
+        # Save file
+        saved_path = default_storage.save(filename, ContentFile(image_file.read()))
+        
+        # Return URL
+        file_url = request.build_absolute_uri(default_storage.url(saved_path))
+        
+        return Response({
+            'url': file_url,
+            'filename': saved_path
+        }, status=status.HTTP_201_CREATED)
+    
+    @action(detail=True, methods=['post'])
+    def export_pdf(self, request, pk=None):
+        """Export note to PDF with proper formatting"""
+        from django.http import HttpResponse
+        from django.utils import timezone
+        
+        note = self.get_object()
+        
+        try:
+            pdf_file = export_note_to_pdf(note)
+            
+            if not pdf_file:
+                return Response(
+                    {'error': 'Failed to generate PDF'},
+                    status=status.HTTP_500_INTERNAL_SERVER_ERROR
+                )
+            
+            # Create HTTP response with PDF content
+            response = HttpResponse(pdf_file.read(), content_type='application/pdf')
+            filename = f"note_{note.slug}_{timezone.now().strftime('%Y%m%d')}.pdf"
+            response['Content-Disposition'] = f'attachment; filename="{filename}"'
+            
+            return response
+        except Exception as e:
+            import traceback
+            error_details = traceback.format_exc()
+            return Response(
+                {'error': f'Failed to export PDF: {str(e)}', 'details': error_details},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
     
     @action(detail=True, methods=['get'])
     def versions(self, request, pk=None):
@@ -93,9 +216,12 @@ class NoteViewSet(viewsets.ModelViewSet):
         
         try:
             version = NoteVersion.objects.get(id=version_id, note=note)
-            note.content = version.content
-            note.content_json = version.content_json
-            note.save()
+            
+            # Create new version before restoring
+            self._create_version_snapshot(note)
+            
+            # Restore from snapshot
+            self._restore_from_snapshot(note, version.snapshot)
             
             serializer = self.get_serializer(note)
             return Response(serializer.data)
@@ -105,329 +231,396 @@ class NoteViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_404_NOT_FOUND
             )
     
-    @action(detail=True, methods=['post'])
-    def duplicate(self, request, pk=None):
-        """Duplicate a note"""
-        note = self.get_object()
-        new_note = Note.objects.create(
-            user=request.user,
-            title=f"{note.title} (Copy)",
-            content=note.content,
-            content_json=note.content_json,
-            tags=note.tags,
-            status='draft',
-            course=note.course,
-            topic=note.topic,
-            subtopic=note.subtopic
+    def _create_version_snapshot(self, note):
+        """Create a version snapshot of current note state"""
+        version_number = note.versions.count() + 1
+        
+        snapshot = {
+            'title': note.title,
+            'tags': note.tags,
+            'status': note.status,
+            'chapters': []
+        }
+        
+        for chapter in note.chapters.all():
+            chapter_data = {
+                'title': chapter.title,
+                'order': chapter.order,
+                'topics': []
+            }
+            
+            for topic in chapter.topics.all():
+                topic_data = {
+                    'name': topic.name,
+                    'order': topic.order,
+                    'explanation': topic.explanation.content if topic.explanation else None,
+                    'code_snippet': {
+                        'language': topic.code_snippet.language,
+                        'code': topic.code_snippet.code
+                    } if topic.code_snippet else None,
+                    'source': {
+                        'title': topic.source.title,
+                        'url': topic.source.url
+                    } if topic.source else None
+                }
+                chapter_data['topics'].append(topic_data)
+            
+            snapshot['chapters'].append(chapter_data)
+        
+        NoteVersion.objects.create(
+            note=note,
+            version_number=version_number,
+            snapshot=snapshot,
+            changes_summary=f"Auto-save at {note.updated_at}"
         )
+    
+    def destroy(self, request, pk=None):
+        """Delete note with proper cascade deletion"""
+        note = self.get_object()
         
-        # Copy sources
-        new_note.sources.set(note.sources.all())
+        try:
+            with transaction.atomic():
+                # Manually delete all related objects to avoid foreign key issues
+                # Delete chapters (which will cascade to topics via CASCADE)
+                for chapter in note.chapters.all():
+                    # Delete topics and their related objects
+                    for topic in chapter.topics.all():
+                        # Delete related objects explicitly
+                        if topic.explanation:
+                            topic.explanation.delete()
+                        if topic.code_snippet:
+                            topic.code_snippet.delete()
+                        if topic.source:
+                            topic.source.delete()
+                        topic.delete()
+                    chapter.delete()
+                
+                # Delete note versions
+                note.versions.all().delete()
+                
+                # Delete AI generated content related to this note's topics
+                from .models import AIGeneratedContent
+                topic_ids = ChapterTopic.objects.filter(
+                    chapter__note=note
+                ).values_list('id', flat=True)
+                AIGeneratedContent.objects.filter(topic_id__in=topic_ids).delete()
+                
+                # Delete note shares
+                note.shares.all().delete()
+                
+                # Finally delete the note
+                note.delete()
+                
+            return Response(status=status.HTTP_204_NO_CONTENT)
+        except Exception as e:
+            import traceback
+            error_details = traceback.format_exc()
+            return Response(
+                {'error': f'Failed to delete note: {str(e)}', 'details': error_details},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+    
+    def _restore_from_snapshot(self, note, snapshot):
+        """Restore note from snapshot"""
+        with transaction.atomic():
+            # Update note fields
+            note.title = snapshot.get('title', note.title)
+            note.tags = snapshot.get('tags', note.tags)
+            note.status = snapshot.get('status', note.status)
+            note.save()
+            
+            # Delete existing chapters
+            note.chapters.all().delete()
+            
+            # Recreate chapters and topics
+            for chapter_data in snapshot.get('chapters', []):
+                chapter = Chapter.objects.create(
+                    note=note,
+                    title=chapter_data['title'],
+                    order=chapter_data['order']
+                )
+                
+                for topic_data in chapter_data.get('topics', []):
+                    topic = ChapterTopic.objects.create(
+                        chapter=chapter,
+                        name=topic_data['name'],
+                        order=topic_data['order']
+                    )
+                    
+                    # Create explanation
+                    if topic_data.get('explanation'):
+                        explanation = TopicExplanation.objects.create(
+                            content=topic_data['explanation']
+                        )
+                        topic.explanation = explanation
+                    
+                    # Create code snippet
+                    if topic_data.get('code_snippet'):
+                        code = TopicCodeSnippet.objects.create(
+                            language=topic_data['code_snippet']['language'],
+                            code=topic_data['code_snippet']['code']
+                        )
+                        topic.code_snippet = code
+                    
+                    # Create source
+                    if topic_data.get('source'):
+                        source = TopicSource.objects.create(
+                            title=topic_data['source']['title'],
+                            url=topic_data['source']['url']
+                        )
+                        topic.source = source
+                    
+                    topic.save()
+
+
+class ChapterViewSet(viewsets.ModelViewSet):
+    """Chapter CRUD operations"""
+    
+    serializer_class = ChapterSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    
+    def get_queryset(self):
+        return Chapter.objects.filter(
+            note__user=self.request.user
+        ).prefetch_related('topics').order_by('order')
+    
+    def create(self, request):
+        note_id = request.data.get('note_id')
         
-        serializer = self.get_serializer(new_note)
+        if not note_id:
+            return Response(
+                {'error': 'note_id is required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        try:
+            note = Note.objects.get(id=note_id, user=request.user)
+        except Note.DoesNotExist:
+            return Response(
+                {'error': 'Note not found'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        
+        title = request.data.get('title', '').strip()
+        if not title:
+            return Response(
+                {'error': 'Chapter title is required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Get next order number - handle None case properly
+        max_order_result = Chapter.objects.filter(note=note).aggregate(
+            max_order=Max('order')
+        )
+        max_order = max_order_result['max_order']
+        next_order = (max_order + 1) if max_order is not None else 0
+        
+        try:
+            chapter = Chapter.objects.create(
+                note=note,
+                title=title,
+                order=next_order
+            )
+        except Exception as e:
+            return Response(
+                {'error': f'Failed to create chapter: {str(e)}'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+        
+        serializer = self.get_serializer(chapter)
         return Response(serializer.data, status=status.HTTP_201_CREATED)
     
-    @action(detail=False, methods=['post'])
-    def ai_action(self, request):
-        """Perform AI actions on content"""
+    @action(detail=True, methods=['post'])
+    def reorder(self, request, pk=None):
+        """Reorder chapter"""
+        chapter = self.get_object()
+        new_order = request.data.get('order')
+        
+        if new_order is not None:
+            chapter.order = new_order
+            chapter.save()
+        
+        serializer = self.get_serializer(chapter)
+        return Response(serializer.data)
+
+
+class TopicViewSet(viewsets.ModelViewSet):
+    """Topic CRUD operations"""
+    
+    serializer_class = ChapterTopicSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    
+    def get_queryset(self):
+        return ChapterTopic.objects.filter(
+            chapter__note__user=self.request.user
+        ).select_related('explanation', 'code_snippet', 'source').order_by('order')
+    
+    def create(self, request):
+        """Create topic with optional components"""
+        serializer = TopicCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        
+        data = serializer.validated_data
+        chapter_id = data['chapter_id']
+        
+        try:
+            chapter = Chapter.objects.get(id=chapter_id, note__user=request.user)
+        except Chapter.DoesNotExist:
+            return Response(
+                {'error': 'Chapter not found'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        
+        with transaction.atomic():
+            # Calculate next order number for topic
+            max_order_result = ChapterTopic.objects.filter(chapter=chapter).aggregate(
+                max_order=Max('order')
+            )
+            max_order = max_order_result['max_order']
+            next_order = (max_order + 1) if max_order is not None else 0
+            
+            # Create topic
+            topic = ChapterTopic.objects.create(
+                chapter=chapter,
+                name=data['name'],
+                order=next_order
+            )
+            
+            # Create explanation if provided
+            if data.get('explanation_content'):
+                explanation = TopicExplanation.objects.create(
+                    content=data['explanation_content']
+                )
+                topic.explanation = explanation
+            
+            # Create code snippet if provided
+            if data.get('code_content'):
+                code = TopicCodeSnippet.objects.create(
+                    language=data.get('code_language', 'python'),
+                    code=data['code_content']
+                )
+                topic.code_snippet = code
+            
+            # Create source if provided
+            if data.get('source_url'):
+                source = TopicSource.objects.create(
+                    title=data.get('source_title', 'Reference'),
+                    url=data['source_url']
+                )
+                topic.source = source
+            
+            topic.save()
+        
+        response_serializer = ChapterTopicSerializer(topic)
+        return Response(response_serializer.data, status=status.HTTP_201_CREATED)
+    
+    def update(self, request, pk=None):
+        """Update topic and its components"""
+        topic = self.get_object()
+        serializer = TopicUpdateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        
+        data = serializer.validated_data
+        
+        with transaction.atomic():
+            # Update topic fields
+            if 'name' in data:
+                topic.name = data['name']
+            if 'order' in data:
+                topic.order = data['order']
+            
+            # Update explanation
+            if 'explanation_content' in data:
+                if topic.explanation:
+                    topic.explanation.content = data['explanation_content']
+                    topic.explanation.save()
+                elif data['explanation_content']:
+                    explanation = TopicExplanation.objects.create(
+                        content=data['explanation_content']
+                    )
+                    topic.explanation = explanation
+            
+            # Update code snippet
+            if 'code_content' in data:
+                if topic.code_snippet:
+                    topic.code_snippet.code = data['code_content']
+                    if 'code_language' in data:
+                        topic.code_snippet.language = data['code_language']
+                    topic.code_snippet.save()
+                elif data['code_content']:
+                    code = TopicCodeSnippet.objects.create(
+                        language=data.get('code_language', 'python'),
+                        code=data['code_content']
+                    )
+                    topic.code_snippet = code
+            
+            # Update source
+            if 'source_url' in data:
+                if topic.source:
+                    topic.source.url = data['source_url']
+                    if 'source_title' in data:
+                        topic.source.title = data['source_title']
+                    topic.source.save()
+                elif data['source_url']:
+                    source = TopicSource.objects.create(
+                        title=data.get('source_title', 'Reference'),
+                        url=data['source_url']
+                    )
+                    topic.source = source
+            
+            topic.save()
+        
+        response_serializer = ChapterTopicSerializer(topic)
+        return Response(response_serializer.data)
+    
+    @action(detail=True, methods=['post'])
+    def ai_action(self, request, pk=None):
+        """Perform AI action on topic"""
+        topic = self.get_object()
         serializer = AIActionSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         
         action_type = serializer.validated_data['action_type']
-        content = serializer.validated_data['content']
-        note_id = serializer.validated_data.get('note_id')
-        
-        # Get note if provided
-        note = None
-        if note_id:
-            try:
-                note = Note.objects.get(id=note_id, user=request.user)
-            except Note.DoesNotExist:
-                pass
+        input_content = serializer.validated_data['input_content']
         
         # Perform AI action
         generated_content = None
-        if 'summarize' in action_type:
-            length = action_type.split('_')[1]  # short, medium, detailed
-            generated_content = generate_ai_summary(content, length)
-        elif action_type == 'expand':
-            generated_content = generate_ai_expansion(content)
-        elif action_type == 'rewrite':
-            generated_content = generate_ai_rewrite(content)
-        elif action_type == 'breakdown':
-            generated_content = generate_ai_rewrite(content, mode='breakdown')
+        
+        if action_type == 'generate_explanation':
+            generated_content = generate_ai_explanation(input_content)
+        elif action_type == 'improve_explanation':
+            generated_content = improve_explanation(input_content)
+        elif action_type == 'summarize_explanation':
+            generated_content = summarize_explanation(input_content)
+        elif action_type == 'generate_code':
+            language = serializer.validated_data.get('language', 'python')
+            generated_content = generate_ai_code(input_content, language)
         
         # Save AI generation record
-        ai_note = AIGeneratedNote.objects.create(
+        AIGeneratedContent.objects.create(
             user=request.user,
-            note=note,
+            topic=topic,
             action_type=action_type,
-            source_content=content,
-            generated_content=generated_content,
-            model_used='gpt-4'
+            input_content=input_content,
+            generated_content=generated_content
         )
         
         return Response({
             'generated_content': generated_content,
-            'ai_note_id': ai_note.id
+            'action_type': action_type
         })
-    
-    @action(detail=False, methods=['post'])
-    def approve_ai_content(self, request):
-        """Approve AI generated content"""
-        ai_note_id = request.data.get('ai_note_id')
-        note_id = request.data.get('note_id')
-        
-        try:
-            ai_note = AIGeneratedNote.objects.get(id=ai_note_id, user=request.user)
-            ai_note.approved = True
-            ai_note.approved_at = timezone.now()
-            ai_note.save()
-            
-            # Optionally update the note
-            if note_id:
-                note = Note.objects.get(id=note_id, user=request.user)
-                note.content = ai_note.generated_content
-                note.save()
-            
-            return Response({'status': 'approved'})
-        except (AIGeneratedNote.DoesNotExist, Note.DoesNotExist):
-            return Response(
-                {'error': 'Not found'},
-                status=status.HTTP_404_NOT_FOUND
-            )
-    
-    @action(detail=False, methods=['post'])
-    def import_youtube(self, request):
-        """Import YouTube video and generate notes"""
-        serializer = YouTubeImportSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        
-        video_url = serializer.validated_data['video_url']
-        generate_notes = serializer.validated_data['generate_notes']
-        note_title = serializer.validated_data.get('note_title')
-        
-        # Fetch transcript
-        video_data = fetch_youtube_transcript(video_url)
-        
-        # Save transcript
-        yt_transcript = YouTubeTranscript.objects.create(
-            user=request.user,
-            video_url=video_url,
-            video_id=video_data['video_id'],
-            video_title=video_data['title'],
-            transcript=video_data['transcript'],
-            timestamps=video_data['timestamps']
-        )
-        
-        response_data = {
-            'transcript_id': yt_transcript.id,
-            'video_title': video_data['title']
-        }
-        
-        # Generate notes if requested
-        if generate_notes:
-            notes_content = generate_notes_from_transcript(video_data['transcript'])
-            
-            note = Note.objects.create(
-                user=request.user,
-                title=note_title or f"Notes: {video_data['title']}",
-                content=notes_content,
-                status='draft'
-            )
-            
-            # Create source reference
-            source = NoteSource.objects.create(
-                user=request.user,
-                source_type='youtube',
-                title=video_data['title'],
-                url=video_url,
-                reference_number=NoteSource.objects.filter(user=request.user).count() + 1
-            )
-            note.sources.add(source)
-            
-            yt_transcript.processed = True
-            yt_transcript.notes_generated = note
-            yt_transcript.save()
-            
-            response_data['note_id'] = note.id
-            response_data['note_title'] = note.title
-        
-        return Response(response_data, status=status.HTTP_201_CREATED)
     
     @action(detail=True, methods=['post'])
-    def export_pdf(self, request, pk=None):
-        """Export note to PDF"""
-        note = self.get_object()
-        serializer = ExportNoteSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
+    def reorder(self, request, pk=None):
+        """Reorder topic"""
+        topic = self.get_object()
+        new_order = request.data.get('order')
         
-        include_sources = serializer.validated_data.get('include_sources', True)
-        include_code = serializer.validated_data.get('include_code', True)
+        if new_order is not None:
+            topic.order = new_order
+            topic.save()
         
-        # Generate PDF
-        pdf_file = export_note_to_pdf(
-            note,
-            include_sources=include_sources,
-            include_code=include_code
-        )
-        
-        return Response({
-            'pdf_url': pdf_file.url if pdf_file else None,
-            'message': 'PDF generated successfully'
-        })
-    
-    @action(detail=False, methods=['get'])
-    def daily_notes(self, request):
-        """Get notes for a specific day"""
-        target_date = request.query_params.get('date', date.today())
-        notes = Note.objects.filter(
-            user=request.user,
-            session_date=target_date
-        )
-        serializer = self.get_serializer(notes, many=True)
-        return Response(serializer.data)
-
-
-class CodeSnippetViewSet(viewsets.ModelViewSet):
-    """Code snippet management"""
-    
-    serializer_class = CodeSnippetSerializer
-    permission_classes = [permissions.IsAuthenticated]
-    
-    def get_queryset(self):
-        queryset = CodeSnippet.objects.filter(user=self.request.user)
-        
-        # Filter by language
-        language = self.request.query_params.get('language')
-        if language:
-            queryset = queryset.filter(language=language)
-        
-        # Filter by note
-        note_id = self.request.query_params.get('note')
-        if note_id:
-            queryset = queryset.filter(note_id=note_id)
-        
-        # Search
-        search = self.request.query_params.get('search')
-        if search:
-            queryset = queryset.filter(
-                Q(title__icontains=search) | 
-                Q(code__icontains=search) |
-                Q(description__icontains=search)
-            )
-        
-        return queryset
-    
-    def perform_create(self, serializer):
-        serializer.save(user=self.request.user)
-
-
-class NoteSourceViewSet(viewsets.ModelViewSet):
-    """Manage note sources and references"""
-    
-    serializer_class = NoteSourceSerializer
-    permission_classes = [permissions.IsAuthenticated]
-    
-    def get_queryset(self):
-        return NoteSource.objects.filter(user=self.request.user)
-    
-    @action(detail=False, methods=['post'])
-    def auto_fetch(self, request):
-        """Automatically fetch source metadata from URL"""
-        url = request.data.get('url')
-        source_type = request.data.get('source_type', 'url')
-        
-        # TODO: Implement metadata fetching
-        # Use libraries like newspaper3k, BeautifulSoup, etc.
-        
-        return Response({
-            'title': 'Fetched Title',
-            'author': 'Fetched Author',
-            'date': date.today()
-        })
-
-
-class NoteTemplateViewSet(viewsets.ReadOnlyModelViewSet):
-    """Note templates for quick creation"""
-    
-    serializer_class = NoteTemplateSerializer
-    permission_classes = [permissions.IsAuthenticated]
-    
-    def get_queryset(self):
-        return NoteTemplate.objects.filter(
-            Q(is_system=True) | Q(user=self.request.user)
-        )
-    
-    @action(detail=True, methods=['post'])
-    def use_template(self, request, pk=None):
-        """Create a note from template"""
-        template = self.get_object()
-        title = request.data.get('title', 'New Note')
-        
-        note = Note.objects.create(
-            user=request.user,
-            title=title,
-            content_json=template.template_content,
-            status='draft'
-        )
-        
-        serializer = NoteDetailSerializer(note)
-        return Response(serializer.data, status=status.HTTP_201_CREATED)
-
-
-class DailyReportViewSet(viewsets.ReadOnlyModelViewSet):
-    """Daily learning reports"""
-    
-    serializer_class = DailyNoteReportSerializer
-    permission_classes = [permissions.IsAuthenticated]
-    
-    def get_queryset(self):
-        return DailyNoteReport.objects.filter(user=self.request.user)
-    
-    @action(detail=False, methods=['post'])
-    def generate_today(self, request):
-        """Manually generate today's report"""
-        today = date.today()
-        
-        # Get today's notes
-        notes_created = Note.objects.filter(
-            user=request.user,
-            created_at__date=today
-        ).count()
-        
-        notes_updated = Note.objects.filter(
-            user=request.user,
-            updated_at__date=today
-        ).exclude(created_at__date=today).count()
-        
-        # Get topics covered
-        topics = Note.objects.filter(
-            user=request.user,
-            session_date=today
-        ).values_list('topic__title', flat=True).distinct()
-        
-        # Generate AI summary
-        ai_summary = "Your daily learning summary..."  # TODO: Implement
-        
-        # Create or update report
-        report, created = DailyNoteReport.objects.update_or_create(
-            user=request.user,
-            report_date=today,
-            defaults={
-                'notes_created': notes_created,
-                'notes_updated': notes_updated,
-                'topics_covered': list(topics),
-                'ai_summary': ai_summary
-            }
-        )
-        
-        # Generate PDF
-        pdf_file = generate_daily_report_pdf(report)
-        report.pdf_file = pdf_file
-        report.save()
-        
-        serializer = self.get_serializer(report)
+        serializer = self.get_serializer(topic)
         return Response(serializer.data)
 
 
@@ -441,26 +634,3 @@ class NoteShareViewSet(viewsets.ModelViewSet):
         return NoteShare.objects.filter(
             Q(shared_by=self.request.user) | Q(shared_with=self.request.user)
         )
-    
-    @action(detail=False, methods=['post'])
-    def create_public_share(self, request):
-        """Create a public shareable link"""
-        note_id = request.data.get('note_id')
-        
-        try:
-            note = Note.objects.get(id=note_id, user=request.user)
-            
-            share = NoteShare.objects.create(
-                note=note,
-                shared_by=request.user,
-                is_public=True,
-                permission='view'
-            )
-            
-            serializer = self.get_serializer(share)
-            return Response(serializer.data, status=status.HTTP_201_CREATED)
-        except Note.DoesNotExist:
-            return Response(
-                {'error': 'Note not found'},
-                status=status.HTTP_404_NOT_FOUND
-            )

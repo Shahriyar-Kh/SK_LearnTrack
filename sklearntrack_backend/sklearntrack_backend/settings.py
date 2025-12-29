@@ -185,6 +185,12 @@ DEFAULT_FROM_EMAIL = config('DEFAULT_FROM_EMAIL', default=EMAIL_HOST_USER)
 CELERY_BROKER_URL = config('CELERY_BROKER_URL', default='redis://localhost:6379/0')
 CELERY_RESULT_BACKEND = config('CELERY_RESULT_BACKEND', default='redis://localhost:6379/0')
 CELERY_ACCEPT_CONTENT = ['json']
+
+# Groq API Configuration (Free AI alternative to OpenAI)
+# Get your free API key from https://console.groq.com
+GROQ_API_KEY = config('GROQ_API_KEY', default='')
+# Fallback to OpenAI for backward compatibility
+OPENAI_API_KEY = config('OPENAI_API_KEY', default='')
 CELERY_TASK_SERIALIZER = 'json'
 CELERY_RESULT_SERIALIZER = 'json'
 CELERY_TIMEZONE = TIME_ZONE

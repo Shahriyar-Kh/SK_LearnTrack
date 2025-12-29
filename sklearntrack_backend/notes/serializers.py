@@ -3,82 +3,156 @@
 
 from rest_framework import serializers
 from .models import (
-    Note, NoteVersion, CodeSnippet, NoteSource, 
-    NoteTemplate, DailyNoteReport, AIGeneratedNote,
-    YouTubeTranscript, NoteShare
+    Note, Chapter, ChapterTopic, TopicExplanation, 
+    TopicCodeSnippet, TopicSource, NoteVersion, 
+    AIGeneratedContent, NoteShare
 )
 
 
-class NoteSourceSerializer(serializers.ModelSerializer):
+class TopicExplanationSerializer(serializers.ModelSerializer):
     class Meta:
-        model = NoteSource
+        model = TopicExplanation
+        fields = ['id', 'content', 'created_at', 'updated_at']
+
+
+class TopicCodeSnippetSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = TopicCodeSnippet
+        fields = ['id', 'language', 'code', 'created_at', 'updated_at']
+
+
+class TopicSourceSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = TopicSource
+        fields = ['id', 'title', 'url', 'created_at']
+
+
+class ChapterTopicSerializer(serializers.ModelSerializer):
+    explanation = TopicExplanationSerializer(required=False, allow_null=True)
+    code_snippet = TopicCodeSnippetSerializer(required=False, allow_null=True)
+    source = TopicSourceSerializer(required=False, allow_null=True)
+    
+    has_explanation = serializers.BooleanField(read_only=True)
+    has_code = serializers.BooleanField(read_only=True)
+    has_source = serializers.BooleanField(read_only=True)
+    
+    class Meta:
+        model = ChapterTopic
         fields = [
-            'id', 'source_type', 'title', 'url', 'author', 
-            'date', 'reference_number', 'metadata', 'created_at'
+            'id', 'name', 'order', 
+            'explanation', 'code_snippet', 'source',
+            'has_explanation', 'has_code', 'has_source',
+            'created_at', 'updated_at'
         ]
-        read_only_fields = ['reference_number', 'created_at']
     
     def create(self, validated_data):
-        # Auto-assign reference number
-        user = self.context['request'].user
-        last_ref = NoteSource.objects.filter(user=user).order_by('-reference_number').first()
-        validated_data['reference_number'] = (last_ref.reference_number + 1) if last_ref else 1
-        validated_data['user'] = user
-        return super().create(validated_data)
+        explanation_data = validated_data.pop('explanation', None)
+        code_data = validated_data.pop('code_snippet', None)
+        source_data = validated_data.pop('source', None)
+        
+        topic = ChapterTopic.objects.create(**validated_data)
+        
+        if explanation_data:
+            explanation = TopicExplanation.objects.create(**explanation_data)
+            topic.explanation = explanation
+        
+        if code_data:
+            code = TopicCodeSnippet.objects.create(**code_data)
+            topic.code_snippet = code
+        
+        if source_data:
+            source = TopicSource.objects.create(**source_data)
+            topic.source = source
+        
+        topic.save()
+        return topic
+    
+    def update(self, instance, validated_data):
+        explanation_data = validated_data.pop('explanation', None)
+        code_data = validated_data.pop('code_snippet', None)
+        source_data = validated_data.pop('source', None)
+        
+        # Update topic fields
+        instance.name = validated_data.get('name', instance.name)
+        instance.order = validated_data.get('order', instance.order)
+        
+        # Update or create explanation
+        if explanation_data is not None:
+            if instance.explanation:
+                for key, value in explanation_data.items():
+                    setattr(instance.explanation, key, value)
+                instance.explanation.save()
+            else:
+                explanation = TopicExplanation.objects.create(**explanation_data)
+                instance.explanation = explanation
+        
+        # Update or create code snippet
+        if code_data is not None:
+            if instance.code_snippet:
+                for key, value in code_data.items():
+                    setattr(instance.code_snippet, key, value)
+                instance.code_snippet.save()
+            else:
+                code = TopicCodeSnippet.objects.create(**code_data)
+                instance.code_snippet = code
+        
+        # Update or create source
+        if source_data is not None:
+            if instance.source:
+                for key, value in source_data.items():
+                    setattr(instance.source, key, value)
+                instance.source.save()
+            else:
+                source = TopicSource.objects.create(**source_data)
+                instance.source = source
+        
+        instance.save()
+        return instance
 
 
-class CodeSnippetSerializer(serializers.ModelSerializer):
+class ChapterSerializer(serializers.ModelSerializer):
+    topics = ChapterTopicSerializer(many=True, read_only=True)
+    topic_count = serializers.SerializerMethodField()
+    
     class Meta:
-        model = CodeSnippet
-        fields = [
-            'id', 'title', 'language', 'code', 'description', 
-            'tags', 'course', 'note', 'created_at', 'updated_at'
-        ]
-
-
-class NoteVersionSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = NoteVersion
-        fields = [
-            'id', 'version_number', 'content', 'content_json',
-            'changes_summary', 'saved_at'
-        ]
-        read_only_fields = ['version_number', 'saved_at']
+        model = Chapter
+        fields = ['id', 'title', 'order', 'topics', 'topic_count', 'created_at', 'updated_at']
+    
+    def get_topic_count(self, obj):
+        return obj.topics.count()
 
 
 class NoteListSerializer(serializers.ModelSerializer):
     """Lightweight serializer for list views"""
-    source_count = serializers.SerializerMethodField()
-    snippet_count = serializers.SerializerMethodField()
+    chapter_count = serializers.SerializerMethodField()
+    total_topics = serializers.SerializerMethodField()
     
     class Meta:
         model = Note
         fields = [
             'id', 'title', 'slug', 'tags', 'status',
-            'course', 'topic', 'subtopic',
-            'source_count', 'snippet_count',
+            'course', 'chapter_count', 'total_topics',
             'created_at', 'updated_at'
         ]
     
-    def get_source_count(self, obj):
-        return obj.sources.count()
+    def get_chapter_count(self, obj):
+        return obj.chapters.count()
     
-    def get_snippet_count(self, obj):
-        return obj.code_snippets.count()
+    def get_total_topics(self, obj):
+        return ChapterTopic.objects.filter(chapter__note=obj).count()
 
 
 class NoteDetailSerializer(serializers.ModelSerializer):
-    sources = NoteSourceSerializer(many=True, read_only=True)
-    code_snippets = CodeSnippetSerializer(many=True, read_only=True)
+    chapters = ChapterSerializer(many=True, read_only=True)
     version_count = serializers.SerializerMethodField()
     
     class Meta:
         model = Note
         fields = [
-            'id', 'title', 'slug', 'content', 'content_json',
-            'tags', 'status', 'course', 'topic', 'subtopic',
-            'sources', 'code_snippets', 'toc', 'session_date',
-            'version_count', 'created_at', 'updated_at'
+            'id', 'title', 'slug', 'tags', 'status',
+            'course', 'course_topic', 'course_subtopic',
+            'chapters', 'version_count', 'session_date',
+            'created_at', 'updated_at'
         ]
         read_only_fields = ['slug', 'created_at', 'updated_at']
     
@@ -88,61 +162,23 @@ class NoteDetailSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         validated_data['user'] = self.context['request'].user
         return super().create(validated_data)
-    
-    def update(self, instance, validated_data):
-        # Create version before updating
-        version_number = instance.versions.count() + 1
-        NoteVersion.objects.create(
-            note=instance,
-            version_number=version_number,
-            content=instance.content,
-            content_json=instance.content_json,
-            changes_summary=f"Update on {instance.updated_at}"
-        )
-        return super().update(instance, validated_data)
 
 
-class NoteTemplateSerializer(serializers.ModelSerializer):
+class NoteVersionSerializer(serializers.ModelSerializer):
     class Meta:
-        model = NoteTemplate
-        fields = [
-            'id', 'name', 'description', 'template_content',
-            'is_system', 'created_at'
-        ]
-        read_only_fields = ['is_system', 'created_at']
+        model = NoteVersion
+        fields = ['id', 'version_number', 'snapshot', 'changes_summary', 'saved_at']
+        read_only_fields = ['version_number', 'saved_at']
 
 
-class DailyNoteReportSerializer(serializers.ModelSerializer):
+class AIGeneratedContentSerializer(serializers.ModelSerializer):
     class Meta:
-        model = DailyNoteReport
+        model = AIGeneratedContent
         fields = [
-            'id', 'report_date', 'notes_created', 'notes_updated',
-            'topics_covered', 'time_spent_minutes', 'ai_summary',
-            'pdf_file', 'email_sent', 'email_sent_at', 'created_at'
+            'id', 'action_type', 'input_content', 'generated_content',
+            'model_used', 'tokens_used', 'created_at'
         ]
         read_only_fields = ['created_at']
-
-
-class AIGeneratedNoteSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = AIGeneratedNote
-        fields = [
-            'id', 'action_type', 'source_content', 'generated_content',
-            'approved', 'approved_at', 'model_used', 'tokens_used',
-            'created_at'
-        ]
-        read_only_fields = ['created_at']
-
-
-class YouTubeTranscriptSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = YouTubeTranscript
-        fields = [
-            'id', 'video_url', 'video_id', 'video_title',
-            'transcript', 'timestamps', 'processed',
-            'notes_generated', 'created_at'
-        ]
-        read_only_fields = ['video_id', 'created_at']
 
 
 class NoteShareSerializer(serializers.ModelSerializer):
@@ -164,30 +200,40 @@ class NoteShareSerializer(serializers.ModelSerializer):
         return super().create(validated_data)
 
 
-# AI Action Request Serializers
+# AI Action Serializers
 class AIActionSerializer(serializers.Serializer):
-    """Base serializer for AI actions"""
+    """Serializer for AI actions"""
     action_type = serializers.ChoiceField(choices=[
-        'summarize_short', 'summarize_medium', 'summarize_detailed',
-        'expand', 'rewrite', 'breakdown'
+        'generate_explanation',
+        'improve_explanation',
+        'summarize_explanation',
+        'generate_code'
     ])
-    content = serializers.CharField()
-    note_id = serializers.IntegerField(required=False)
-
-
-class YouTubeImportSerializer(serializers.Serializer):
-    """Serializer for YouTube video import"""
-    video_url = serializers.URLField()
-    generate_notes = serializers.BooleanField(default=True)
-    note_title = serializers.CharField(required=False)
-
-
-class ExportNoteSerializer(serializers.Serializer):
-    """Serializer for note export"""
-    export_type = serializers.ChoiceField(choices=[
-        'daily', 'full', 'topic'
-    ])
-    date = serializers.DateField(required=False)
+    input_content = serializers.CharField()
     topic_id = serializers.IntegerField(required=False)
-    include_sources = serializers.BooleanField(default=True)
-    include_code = serializers.BooleanField(default=True)
+    language = serializers.CharField(required=False, default='python')
+
+
+class TopicCreateSerializer(serializers.Serializer):
+    """Serializer for creating a topic with all components"""
+    chapter_id = serializers.IntegerField()
+    name = serializers.CharField(max_length=500)
+    order = serializers.IntegerField(required=False, default=0)
+    
+    explanation_content = serializers.CharField(required=False, allow_blank=True)
+    code_language = serializers.CharField(required=False, default='python')
+    code_content = serializers.CharField(required=False, allow_blank=True)
+    source_title = serializers.CharField(required=False, allow_blank=True)
+    source_url = serializers.URLField(required=False, allow_blank=True)
+
+
+class TopicUpdateSerializer(serializers.Serializer):
+    """Serializer for updating topic components"""
+    name = serializers.CharField(max_length=500, required=False)
+    order = serializers.IntegerField(required=False)
+    
+    explanation_content = serializers.CharField(required=False, allow_blank=True)
+    code_language = serializers.CharField(required=False)
+    code_content = serializers.CharField(required=False, allow_blank=True)
+    source_title = serializers.CharField(required=False, allow_blank=True)
+    source_url = serializers.URLField(required=False, allow_blank=True)

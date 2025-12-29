@@ -11,7 +11,7 @@ beautifulsoup4==4.12.3
 html2text==2020.1.16
 
 # NLP and AI (Optional - for advanced features)
-# openai==1.12.0  # Uncomment if using OpenAI API
+openai>=1.12.0  # OpenAI API for AI features
 # transformers==4.36.2  # Uncomment for local AI models
 
 # Background Tasks (already in your requirements)

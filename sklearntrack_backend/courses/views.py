@@ -50,6 +50,48 @@ class CourseViewSet(viewsets.ModelViewSet):
         enrollment = get_object_or_404(Enrollment, user=request.user, course=course)
         serializer = EnrollmentSerializer(enrollment)
         return Response(serializer.data)
+    
+    @action(detail=False, methods=['get'], url_path='enrollments')
+    def enrollments(self, request):
+        """
+        Get user's course enrollments
+        URL: /api/courses/enrollments/
+        """
+        try:
+            # Import your Enrollment model (adjust path as needed)
+            from .models import Enrollment
+            
+            # Get user's enrollments
+            enrollments = Enrollment.objects.filter(
+                user=request.user
+            ).select_related('course').order_by('-enrolled_at')
+            
+            # Build response data
+            data = []
+            for enrollment in enrollments:
+                course_data = {
+                    'id': enrollment.id,
+                    'course': {
+                        'id': enrollment.course.id,
+                        'title': enrollment.course.title,
+                        'slug': enrollment.course.slug,
+                        'description': enrollment.course.description if hasattr(enrollment.course, 'description') else '',
+                        'difficulty': enrollment.course.difficulty if hasattr(enrollment.course, 'difficulty') else None,
+                    },
+                    'enrolled_at': enrollment.enrolled_at,
+                    'progress': getattr(enrollment, 'progress', 0),
+                    'completed': getattr(enrollment, 'completed', False),
+                    'last_accessed': getattr(enrollment, 'last_accessed', None),
+                }
+                data.append(course_data)
+            
+            return Response(data, status=status.HTTP_200_OK)
+            
+        except Exception as e:
+            return Response(
+                {'error': str(e)}, 
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 
 
 class EnrollmentViewSet(viewsets.ReadOnlyModelViewSet):
