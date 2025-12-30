@@ -339,15 +339,11 @@ def format_text_for_pdf(text):
 
 
 # ========================================================================
-# GROQ AI INTEGRATION - Free and Fast Alternative to OpenAI
+# GROQ AI INTEGRATION - IMPROVED FORMATTING
 # ========================================================================
 
 def _get_groq_client():
-    """
-    Get Groq client for AI operations
-    Groq provides free, fast AI inference compatible with OpenAI API
-    Get your free API key from: https://console.groq.com
-    """
+    """Get Groq client for AI operations"""
     try:
         from groq import Groq
         from django.conf import settings
@@ -358,7 +354,6 @@ def _get_groq_client():
         
         return Groq(api_key=api_key)
     except ImportError:
-        # Fallback to OpenAI-compatible client if groq package not installed
         try:
             import openai
             from django.conf import settings
@@ -377,42 +372,120 @@ def _get_groq_client():
         print(f"Error initializing Groq client: {e}")
         return None
 
+def markdown_to_html(markdown_text):
+    """
+    Convert Markdown to HTML formatted for ReactQuill
+    This makes the AI-generated content look beautiful in the editor
+    """
+    if not markdown_text:
+        return ""
+    
+    html = markdown_text
+    
+    # Convert headers (## to <h2>, ### to <h3>)
+    html = re.sub(r'^### (.*?)$', r'<h3>\1</h3>', html, flags=re.MULTILINE)
+    html = re.sub(r'^## (.*?)$', r'<h2>\1</h2>', html, flags=re.MULTILINE)
+    html = re.sub(r'^# (.*?)$', r'<h1>\1</h1>', html, flags=re.MULTILINE)
+    
+    # Convert bold (**text** or __text__)
+    html = re.sub(r'\*\*(.*?)\*\*', r'<strong>\1</strong>', html)
+    html = re.sub(r'__(.*?)__', r'<strong>\1</strong>', html)
+    
+    # Convert italic (*text* or _text_)
+    html = re.sub(r'\*(.*?)\*', r'<em>\1</em>', html)
+    html = re.sub(r'_(.*?)_', r'<em>\1</em>', html)
+    
+    # Convert inline code (`code`)
+    html = re.sub(r'`(.*?)`', r'<code>\1</code>', html)
+    
+    # Convert code blocks (```language ... ```)
+    def code_block_replacer(match):
+        language = match.group(1) or 'plaintext'
+        code = match.group(2).strip()
+        return f'<pre><code class="language-{language}">{code}</code></pre>'
+    
+    html = re.sub(r'```(\w*)\n(.*?)```', code_block_replacer, html, flags=re.DOTALL)
+    
+    # Convert bullet lists (* item or - item)
+    lines = html.split('\n')
+    in_list = False
+    result = []
+    
+    for line in lines:
+        stripped = line.strip()
+        
+        # Check if line is a bullet point
+        if stripped.startswith('* ') or stripped.startswith('- '):
+            if not in_list:
+                result.append('<ul>')
+                in_list = True
+            content = stripped[2:]  # Remove '* ' or '- '
+            result.append(f'<li>{content}</li>')
+        else:
+            if in_list:
+                result.append('</ul>')
+                in_list = False
+            if stripped:  # Not empty line
+                result.append(f'<p>{line}</p>')
+            else:
+                result.append('<br/>')
+    
+    if in_list:
+        result.append('</ul>')
+    
+    html = '\n'.join(result)
+    
+    # Convert links [text](url)
+    html = re.sub(r'\[(.*?)\]\((.*?)\)', r'<a href="\2">\1</a>', html)
+    
+    # Clean up multiple line breaks
+    html = re.sub(r'(<br/>\s*){3,}', '<br/><br/>', html)
+    html = re.sub(r'(<p></p>\s*)+', '', html)
+    
+    return html
+
 
 def generate_ai_explanation(topic_name):
-    """Generate explanation for a topic using Groq API"""
+    """Generate explanation for a topic using Groq API - IMPROVED FORMATTING"""
     client = _get_groq_client()
     
     if not client:
-        return f"""# {topic_name}
-
-## Overview
-This is a placeholder explanation. To enable AI-powered content generation:
-
-1. Get your free API key from https://console.groq.com
-2. Add it to your .env file: `GROQ_API_KEY=your_key_here`
-3. Install the Groq SDK: `pip install groq`
-
-**What is {topic_name}?**
-
-{topic_name} is an important concept that requires detailed explanation. Once you configure the Groq API, this content will be automatically generated with comprehensive explanations, examples, and insights.
-
-## Key Points
-- Configure Groq API for AI features
-- Free tier available with generous limits
-- Fast inference with Llama models
-"""
+        return """<h2>Configuration Required</h2>
+<p>To enable AI-powered content generation, please configure your Groq API key:</p>
+<ol>
+<li>Get your free API key from <a href="https://console.groq.com">https://console.groq.com</a></li>
+<li>Add it to your .env file: <code>GROQ_API_KEY=your_key_here</code></li>
+<li>Install the Groq SDK: <code>pip install groq</code></li>
+</ol>
+<p>Once configured, AI will generate beautiful, well-structured explanations automatically.</p>"""
     
     try:
         response = client.chat.completions.create(
-            model="llama-3.3-70b-versatile",  # Best Groq model
+            model="llama-3.3-70b-versatile",
             messages=[
                 {
                     "role": "system",
-                    "content": "You are an expert educational assistant. Provide clear, detailed explanations suitable for study notes. Use Markdown formatting with headings (##), bullet points, and code blocks where appropriate. Be comprehensive but concise."
+                    "content": """You are an expert educational content writer. Create clear, well-structured explanations for study notes.
+
+IMPORTANT FORMATTING RULES:
+- Use ## for main section headers
+- Use ### for subsection headers  
+- Use bullet points with * for lists
+- Use **bold** for key terms
+- Use `code` for inline code/technical terms
+- Keep paragraphs concise (2-3 sentences max)
+- Add blank lines between sections
+- Make content visually scannable
+
+Structure your response with:
+1. Overview section
+2. Key Concepts section (with bullet points)
+3. Practical Examples section (with code if applicable)
+4. Common Applications section"""
                 },
                 {
                     "role": "user",
-                    "content": f"Provide a comprehensive explanation of: {topic_name}. Include: 1) Overview, 2) Key concepts, 3) Practical examples, 4) Common use cases or applications. Format using Markdown."
+                    "content": f"Provide a comprehensive, well-structured explanation of: {topic_name}"
                 }
             ],
             temperature=0.7,
@@ -421,39 +494,38 @@ This is a placeholder explanation. To enable AI-powered content generation:
             stream=False
         )
         
-        return response.choices[0].message.content
+        markdown_content = response.choices[0].message.content
+        html_content = markdown_to_html(markdown_content)
+        
+        return html_content
+        
     except Exception as e:
         error_msg = str(e)
-        return f"""# {topic_name}
-
-## Error Generating AI Content
-
-**Error:** {error_msg}
-
-**Troubleshooting:**
-1. Check your GROQ_API_KEY in settings
-2. Verify API key is valid at https://console.groq.com
-3. Ensure you have internet connectivity
-4. Check Groq API status at https://status.groq.com
-
-**Manual Entry:**
-Please write your explanation manually or try the AI generation again after fixing the configuration.
-"""
+        return f"""<h2>Error Generating AI Content</h2>
+<p><strong>Error:</strong> {error_msg}</p>
+<h3>Troubleshooting:</h3>
+<ul>
+<li>Check your GROQ_API_KEY in settings</li>
+<li>Verify API key is valid at <a href="https://console.groq.com">console.groq.com</a></li>
+<li>Ensure you have internet connectivity</li>
+<li>Check Groq API status at <a href="https://status.groq.com">status.groq.com</a></li>
+</ul>
+<p>Please write your explanation manually or try the AI generation again after fixing the configuration.</p>"""
 
 
 def improve_explanation(current_explanation):
-    """Improve existing explanation using Groq API"""
+    """Improve existing explanation using Groq API - IMPROVED FORMATTING"""
     client = _get_groq_client()
     
     if not client:
         return f"""{current_explanation}
-
----
-
-**💡 AI Improvement Available**
-
-Configure GROQ_API_KEY to enable AI-powered explanation improvements. Get your free key from https://console.groq.com
-"""
+<hr/>
+<p><strong>💡 AI Improvement Available</strong></p>
+<p>Configure GROQ_API_KEY to enable AI-powered explanation improvements. Get your free key from <a href="https://console.groq.com">console.groq.com</a></p>"""
+    
+    # Convert HTML back to text for processing
+    text_content = re.sub(r'<[^>]+>', ' ', current_explanation)
+    text_content = re.sub(r'\s+', ' ', text_content).strip()
     
     try:
         response = client.chat.completions.create(
@@ -461,11 +533,24 @@ Configure GROQ_API_KEY to enable AI-powered explanation improvements. Get your f
             messages=[
                 {
                     "role": "system",
-                    "content": "You are an expert editor and educational content improver. Enhance explanations for clarity, structure, accuracy, and educational value. Maintain Markdown formatting. Add examples where helpful."
+                    "content": """You are an expert editor for educational content. Improve explanations for clarity, structure, and educational value.
+
+FORMATTING REQUIREMENTS:
+- Use ## for main headers
+- Use ### for subheaders
+- Use bullet points with * for lists
+- Use **bold** for emphasis on key terms
+- Use `code` for technical terms
+- Keep paragraphs short and focused
+- Add clear section breaks
+- Make content easy to scan visually"""
                 },
                 {
                     "role": "user",
-                    "content": f"Improve the following explanation for better clarity, structure, and educational value. Add relevant examples if missing. Keep Markdown format:\n\n{current_explanation}"
+                    "content": f"""Improve the following explanation for better clarity, structure, and educational value. 
+Add relevant examples if missing. Maintain good formatting:
+
+{text_content}"""
                 }
             ],
             temperature=0.7,
@@ -474,34 +559,36 @@ Configure GROQ_API_KEY to enable AI-powered explanation improvements. Get your f
             stream=False
         )
         
-        return response.choices[0].message.content
+        markdown_content = response.choices[0].message.content
+        html_content = markdown_to_html(markdown_content)
+        
+        return html_content
+        
     except Exception as e:
         return f"""{current_explanation}
-
----
-
-**⚠️ AI Improvement Error:** {str(e)}
-
-Please check your Groq API configuration or improve the content manually.
-"""
+<hr/>
+<p><strong>⚠️ AI Improvement Error:</strong> {str(e)}</p>
+<p>Please check your Groq API configuration or improve the content manually.</p>"""
 
 
 def summarize_explanation(explanation):
-    """Summarize explanation to key points using Groq API"""
+    """Summarize explanation to key points using Groq API - IMPROVED FORMATTING"""
     client = _get_groq_client()
     
     if not client:
-        return f"""## Key Points Summary
-
-• Main concept from the explanation
-• Important detail to remember
-• Practical application
-• Key takeaway
-
----
-
-**Note:** AI summarization requires GROQ_API_KEY configuration. Get free key from https://console.groq.com
-"""
+        return """<h2>Key Points Summary</h2>
+<ul>
+<li>Main concept from the explanation</li>
+<li>Important detail to remember</li>
+<li>Practical application</li>
+<li>Key takeaway</li>
+</ul>
+<hr/>
+<p><strong>Note:</strong> AI summarization requires GROQ_API_KEY configuration. Get free key from <a href="https://console.groq.com">console.groq.com</a></p>"""
+    
+    # Convert HTML to text
+    text_content = re.sub(r'<[^>]+>', ' ', explanation)
+    text_content = re.sub(r'\s+', ' ', text_content).strip()
     
     try:
         response = client.chat.completions.create(
@@ -509,11 +596,19 @@ def summarize_explanation(explanation):
             messages=[
                 {
                     "role": "system",
-                    "content": "You are an expert at creating concise summaries. Extract and present the most important points in clear bullet format. Use Markdown."
+                    "content": """You are an expert at creating concise summaries. Extract the most important points in clear, well-formatted bullet lists.
+
+FORMATTING RULES:
+- Start with ## Key Points or ## Summary header
+- Use bullet points with * for each key point
+- Each bullet should be one clear, complete sentence
+- Use **bold** for critical terms
+- Limit to 5-8 key points
+- Make each point actionable and memorable"""
                 },
                 {
                     "role": "user",
-                    "content": f"Summarize the following explanation into 4-8 key bullet points. Focus on the most important concepts and practical takeaways:\n\n{explanation}"
+                    "content": f"Summarize the following explanation into key bullet points:\n\n{text_content}"
                 }
             ],
             temperature=0.5,
@@ -522,16 +617,16 @@ def summarize_explanation(explanation):
             stream=False
         )
         
-        return response.choices[0].message.content
+        markdown_content = response.choices[0].message.content
+        html_content = markdown_to_html(markdown_content)
+        
+        return html_content
+        
     except Exception as e:
-        return f"""## Summary Error
-
-**Error:** {str(e)}
-
-**Original Length:** {len(explanation)} characters
-
-Please summarize manually or fix Groq API configuration.
-"""
+        return f"""<h2>Summary Error</h2>
+<p><strong>Error:</strong> {str(e)}</p>
+<p><strong>Original Length:</strong> {len(explanation)} characters</p>
+<p>Please summarize manually or fix Groq API configuration.</p>"""
 
 
 def generate_ai_code(topic_name, language='python'):

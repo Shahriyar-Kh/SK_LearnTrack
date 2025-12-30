@@ -1,24 +1,11 @@
-# PDF Generation
+Django==4.2.7
 reportlab==4.0.9
 pypdf==4.0.1
-
-# YouTube Integration
 youtube-transcript-api==0.6.2
-
-# HTML/Text Processing
 bleach==6.1.0
 beautifulsoup4==4.12.3
 html2text==2020.1.16
-
-# NLP and AI (Optional - for advanced features)
-openai>=1.12.0  # OpenAI API for AI features
-# transformers==4.36.2  # Uncomment for local AI models
-
-# Background Tasks (already in your requirements)
-# celery==5.3.4
-# redis==5.0.1
-# django-celery-beat==2.5.0
-
-# Additional utilities
+openai>=1.12.0
+groq==1.0.0
 python-slugify==8.0.1
-pillow==10.2.0  # For image handling in PDFs
+pillow==10.2.0

@@ -1,12 +1,10 @@
-# FILE: notes/models.py
-# ============================================================================
-# Hierarchical Notes Module: Note → Chapter → Topic
+# FILE: notes/models.py - COMPLETE FIX WITH PROPER CASCADE
 # ============================================================================
 
 from django.db import models
 from django.conf import settings
-from courses.models import Course, Topic as CourseTopic, Subtopic
 from django.utils.text import slugify
+from courses.models import Course, Topic as CourseTopic, Subtopic
 
 
 class Note(models.Model):
@@ -22,7 +20,6 @@ class Note(models.Model):
         on_delete=models.CASCADE,
         related_name='notes'
     )
-
     title = models.CharField(max_length=500)
     slug = models.SlugField(max_length=550, blank=True)
     
@@ -30,10 +27,25 @@ class Note(models.Model):
     tags = models.JSONField(default=list, blank=True)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='draft')
     
-    # Course relationships
-    course = models.ForeignKey(Course, on_delete=models.SET_NULL, null=True, blank=True)
-    course_topic = models.ForeignKey(CourseTopic, on_delete=models.SET_NULL, null=True, blank=True)
-    course_subtopic = models.ForeignKey(Subtopic, on_delete=models.SET_NULL, null=True, blank=True)
+    # Course relationships (optional)
+    course = models.ForeignKey(
+        Course, 
+        on_delete=models.SET_NULL, 
+        null=True, 
+        blank=True
+    )
+    course_topic = models.ForeignKey(
+        CourseTopic, 
+        on_delete=models.SET_NULL, 
+        null=True, 
+        blank=True
+    )
+    course_subtopic = models.ForeignKey(
+        Subtopic, 
+        on_delete=models.SET_NULL, 
+        null=True, 
+        blank=True
+    )
     
     # Timestamps
     created_at = models.DateTimeField(auto_now_add=True)
@@ -47,9 +59,11 @@ class Note(models.Model):
             models.Index(fields=['user', '-updated_at']),
             models.Index(fields=['user', 'status']),
         ]
-        # Ensure unique note titles per user
         constraints = [
-            models.UniqueConstraint(fields=['user', 'title'], name='unique_user_note_title')
+            models.UniqueConstraint(
+                fields=['user', 'title'], 
+                name='unique_user_note_title'
+            )
         ]
     
     def save(self, *args, **kwargs):
@@ -64,7 +78,11 @@ class Note(models.Model):
 class Chapter(models.Model):
     """Chapter within a Note"""
     
-    note = models.ForeignKey(Note, on_delete=models.CASCADE, related_name='chapters')
+    note = models.ForeignKey(
+        Note, 
+        on_delete=models.CASCADE, 
+        related_name='chapters'
+    )
     title = models.CharField(max_length=500)
     order = models.PositiveIntegerField(default=0)
     
@@ -84,7 +102,6 @@ class TopicExplanation(models.Model):
     """Rich text explanation for a topic"""
     
     content = models.TextField()
-    
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     
@@ -137,7 +154,6 @@ class TopicSource(models.Model):
     
     title = models.CharField(max_length=500)
     url = models.URLField(max_length=1000)
-    
     created_at = models.DateTimeField(auto_now_add=True)
     
     class Meta:
@@ -150,11 +166,15 @@ class TopicSource(models.Model):
 class ChapterTopic(models.Model):
     """Topic within a Chapter"""
     
-    chapter = models.ForeignKey(Chapter, on_delete=models.CASCADE, related_name='topics')
+    chapter = models.ForeignKey(
+        Chapter, 
+        on_delete=models.CASCADE, 
+        related_name='topics'
+    )
     name = models.CharField(max_length=500)
     order = models.PositiveIntegerField(default=0)
     
-    # Related components (optional)
+    # Related components (ONE-TO-ONE with CASCADE)
     explanation = models.OneToOneField(
         TopicExplanation, 
         on_delete=models.CASCADE, 
@@ -201,13 +221,16 @@ class ChapterTopic(models.Model):
         return self.source is not None
 
 
-# Keep existing models for backward compatibility
 class NoteVersion(models.Model):
     """Version control for notes"""
     
-    note = models.ForeignKey(Note, on_delete=models.CASCADE, related_name='versions')
+    note = models.ForeignKey(
+        Note, 
+        on_delete=models.CASCADE, 
+        related_name='versions'
+    )
     version_number = models.IntegerField()
-    snapshot = models.JSONField(default=dict)  # Full snapshot of note structure
+    snapshot = models.JSONField(default=dict)
     changes_summary = models.TextField(blank=True)
     saved_at = models.DateTimeField(auto_now_add=True)
     
@@ -231,17 +254,23 @@ class AIGeneratedContent(models.Model):
     )
     
     user = models.ForeignKey(
-    settings.AUTH_USER_MODEL,
-    on_delete=models.CASCADE,
-    related_name='ai_generations')
-
-    topic = models.ForeignKey(ChapterTopic, on_delete=models.CASCADE, related_name='ai_generations', null=True, blank=True)
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='ai_generations'
+    )
+    topic = models.ForeignKey(
+        ChapterTopic, 
+        on_delete=models.CASCADE, 
+        related_name='ai_generations', 
+        null=True, 
+        blank=True
+    )
     
     action_type = models.CharField(max_length=50, choices=AI_ACTIONS)
     input_content = models.TextField()
     generated_content = models.TextField()
     
-    model_used = models.CharField(max_length=100, default='gpt-4')
+    model_used = models.CharField(max_length=100, default='llama-3.3-70b-versatile')
     tokens_used = models.IntegerField(default=0)
     
     created_at = models.DateTimeField(auto_now_add=True)
@@ -262,11 +291,29 @@ class NoteShare(models.Model):
         ('edit', 'Can Edit'),
     )
     
-    note = models.ForeignKey(Note, on_delete=models.CASCADE, related_name='shares')
-    shared_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='shared_notes')
-    shared_with = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='received_notes', null=True, blank=True)
+    note = models.ForeignKey(
+        Note, 
+        on_delete=models.CASCADE, 
+        related_name='shares'
+    )
+    shared_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, 
+        on_delete=models.CASCADE, 
+        related_name='shared_notes'
+    )
+    shared_with = models.ForeignKey(
+        settings.AUTH_USER_MODEL, 
+        on_delete=models.CASCADE, 
+        related_name='received_notes', 
+        null=True, 
+        blank=True
+    )
     
-    permission = models.CharField(max_length=10, choices=PERMISSION_CHOICES, default='view')
+    permission = models.CharField(
+        max_length=10, 
+        choices=PERMISSION_CHOICES, 
+        default='view'
+    )
     is_public = models.BooleanField(default=False)
     public_slug = models.SlugField(max_length=100, unique=True, blank=True)
     
