@@ -1,4 +1,4 @@
-# FILE: notes/utils.py - PDF Export Section
+# FILE: notes/utils.py
 # ============================================================================
 
 from io import BytesIO
@@ -13,18 +13,13 @@ from reportlab.platypus import (
 )
 from reportlab.lib import colors
 from reportlab.lib.enums import TA_LEFT, TA_CENTER, TA_JUSTIFY
+import re
+from html import unescape
 
 
 def export_note_to_pdf(note):
     """
     Export note to PDF with professional hierarchical structure
-    
-    Structure:
-    - Title Page with Note name
-    - Table of Contents (Chapters and Topics)
-    - Chapters with Topics
-    - Each Topic: Explanation (with citations), Code Examples
-    - References section at end
     """
     buffer = BytesIO()
     doc = SimpleDocTemplate(
@@ -174,7 +169,6 @@ def export_note_to_pdf(note):
     chapter_num = 1
     
     for chapter in note.chapters.all().order_by('order'):
-        # Chapter row with bold styling
         toc_data.append([
             Paragraph(f"<b>Chapter {chapter_num}: {chapter.title}</b>", 
                      ParagraphStyle('TOCChapter', parent=styles['Normal'], fontSize=12, 
@@ -215,29 +209,24 @@ def export_note_to_pdf(note):
     # CHAPTERS AND TOPICS
     # ========================================================================
     
-    # Collect all unique sources for references
     all_sources = {}
     source_counter = 1
     
     chapter_num = 1
     for chapter in note.chapters.all().order_by('order'):
-        # Chapter heading
         chapter_title = f"Chapter {chapter_num}: {chapter.title}"
         story.append(Paragraph(chapter_title, chapter_style))
         story.append(Spacer(1, 0.2*inch))
         
         topic_num = 1
         for topic in chapter.topics.all().order_by('order'):
-            # Topic heading
             topic_title = f"{chapter_num}.{topic_num} {topic.name}"
             story.append(Paragraph(topic_title, topic_style))
             story.append(Spacer(1, 0.1*inch))
             
-            # Topic explanation
             if topic.explanation:
                 explanation_text = topic.explanation.content
                 
-                # Add inline citation if source exists
                 if topic.source:
                     source_key = topic.source.url
                     if source_key not in all_sources:
@@ -251,12 +240,10 @@ def export_note_to_pdf(note):
                     citation_num = all_sources[source_key]['number']
                     explanation_text += f" [{citation_num}]"
                 
-                # Format explanation (handle markdown-like formatting)
                 explanation_text = format_text_for_pdf(explanation_text)
                 story.append(Paragraph(explanation_text, body_style))
                 story.append(Spacer(1, 0.15*inch))
             
-            # Code snippet
             if topic.code_snippet:
                 story.append(Spacer(1, 0.1*inch))
                 story.append(Paragraph(
@@ -265,7 +252,6 @@ def export_note_to_pdf(note):
                 ))
                 story.append(Spacer(1, 0.08*inch))
                 
-                # Use Preformatted for code to preserve formatting
                 code_block = Preformatted(
                     topic.code_snippet.code,
                     code_style,
@@ -287,7 +273,6 @@ def export_note_to_pdf(note):
         story.append(Paragraph("References", chapter_style))
         story.append(Spacer(1, 0.25*inch))
         
-        # Sort sources by number
         sorted_sources = sorted(all_sources.values(), key=lambda x: x['number'])
         
         for source in sorted_sources:
@@ -298,9 +283,6 @@ def export_note_to_pdf(note):
             story.append(Paragraph(url_text, reference_style))
             story.append(Spacer(1, 0.12*inch))
     
-    # ========================================================================
-    # BUILD PDF
-    # ========================================================================
     doc.build(story)
     
     pdf_content = buffer.getvalue()
@@ -311,21 +293,15 @@ def export_note_to_pdf(note):
 
 
 def format_text_for_pdf(text):
-    """
-    Format HTML/rich text content for PDF
-    Handles HTML tags from ReactQuill editor
-    """
-    import re
-    from html import unescape
-    
+    """Format HTML/rich text content for PDF"""
     if not text:
         return ""
     
-    # Remove script and style tags for security
+    # Remove script and style tags
     text = re.sub(r'<script[^>]*>.*?</script>', '', text, flags=re.DOTALL | re.IGNORECASE)
     text = re.sub(r'<style[^>]*>.*?</style>', '', text, flags=re.DOTALL | re.IGNORECASE)
     
-    # Convert HTML headings to appropriate sizes
+    # Convert HTML headings
     text = re.sub(r'<h1[^>]*>(.*?)</h1>', r'<b><font size="14">\1</font></b>', text, flags=re.IGNORECASE)
     text = re.sub(r'<h2[^>]*>(.*?)</h2>', r'<b><font size="12">\1</font></b>', text, flags=re.IGNORECASE)
     text = re.sub(r'<h3[^>]*>(.*?)</h3>', r'<b><font size="11">\1</font></b>', text, flags=re.IGNORECASE)
@@ -338,25 +314,19 @@ def format_text_for_pdf(text):
     text = re.sub(r'<li[^>]*>', '• ', text, flags=re.IGNORECASE)
     text = re.sub(r'</li>', '<br/>', text, flags=re.IGNORECASE)
     
-    # Convert paragraphs
+    # Convert paragraphs and breaks
     text = re.sub(r'<p[^>]*>', '', text, flags=re.IGNORECASE)
     text = re.sub(r'</p>', '<br/>', text, flags=re.IGNORECASE)
-    
-    # Convert line breaks
     text = re.sub(r'<br\s*/?>', '<br/>', text, flags=re.IGNORECASE)
     
-    # Convert blockquotes
+    # Convert blockquotes and code
     text = re.sub(r'<blockquote[^>]*>', '<i>', text, flags=re.IGNORECASE)
     text = re.sub(r'</blockquote>', '</i><br/>', text, flags=re.IGNORECASE)
-    
-    # Convert code blocks (keep as is, will be handled separately if needed)
     text = re.sub(r'<pre[^>]*>', '<font face="Courier">', text, flags=re.IGNORECASE)
     text = re.sub(r'</pre>', '</font>', text, flags=re.IGNORECASE)
-    
-    # Convert inline code
     text = re.sub(r'<code[^>]*>(.*?)</code>', r'<font face="Courier"><b>\1</b></font>', text, flags=re.IGNORECASE)
     
-    # Remove remaining HTML tags that aren't supported by ReportLab
+    # Remove remaining HTML tags
     text = re.sub(r'<[^>]+>', '', text)
     
     # Unescape HTML entities
@@ -369,150 +339,274 @@ def format_text_for_pdf(text):
 
 
 # ========================================================================
-# AI GENERATION FUNCTIONS - Groq API Integration (Free Alternative to OpenAI)
+# GROQ AI INTEGRATION - Free and Fast Alternative to OpenAI
 # ========================================================================
 
 def _get_groq_client():
-    """Get Groq client if available (Free AI API compatible with OpenAI)"""
+    """
+    Get Groq client for AI operations
+    Groq provides free, fast AI inference compatible with OpenAI API
+    Get your free API key from: https://console.groq.com
+    """
     try:
-        import openai
+        from groq import Groq
         from django.conf import settings
         
-        api_key = getattr(settings, 'GROQ_API_KEY', None) or getattr(settings, 'OPENAI_API_KEY', None)
+        api_key = getattr(settings, 'GROQ_API_KEY', None)
         if not api_key:
             return None
         
-        # Use Groq API (OpenAI-compatible endpoint)
-        # Groq provides free API access with fast inference
-        return openai.OpenAI(
-            api_key=api_key,
-            base_url="https://api.groq.com/openai/v1"
-        )
+        return Groq(api_key=api_key)
     except ImportError:
-        return None
-    except Exception:
+        # Fallback to OpenAI-compatible client if groq package not installed
+        try:
+            import openai
+            from django.conf import settings
+            
+            api_key = getattr(settings, 'GROQ_API_KEY', None)
+            if not api_key:
+                return None
+            
+            return openai.OpenAI(
+                api_key=api_key,
+                base_url="https://api.groq.com/openai/v1"
+            )
+        except ImportError:
+            return None
+    except Exception as e:
+        print(f"Error initializing Groq client: {e}")
         return None
 
 
 def generate_ai_explanation(topic_name):
-    """Generate explanation for a topic using Groq API (Free)"""
+    """Generate explanation for a topic using Groq API"""
     client = _get_groq_client()
     
     if not client:
-        return f"# {topic_name}\n\nThis is a placeholder explanation. Please configure GROQ_API_KEY in settings to enable AI generation.\n\n**What is {topic_name}?**\n\n{topic_name} is a concept that requires detailed explanation. Get your free API key from https://console.groq.com"
+        return f"""# {topic_name}
+
+## Overview
+This is a placeholder explanation. To enable AI-powered content generation:
+
+1. Get your free API key from https://console.groq.com
+2. Add it to your .env file: `GROQ_API_KEY=your_key_here`
+3. Install the Groq SDK: `pip install groq`
+
+**What is {topic_name}?**
+
+{topic_name} is an important concept that requires detailed explanation. Once you configure the Groq API, this content will be automatically generated with comprehensive explanations, examples, and insights.
+
+## Key Points
+- Configure Groq API for AI features
+- Free tier available with generous limits
+- Fast inference with Llama models
+"""
     
     try:
-        # Use Groq's fast models (llama3-8b-8192 or mixtral-8x7b-32768)
         response = client.chat.completions.create(
-            model="llama3-8b-8192",  # Fast and free Groq model
+            model="llama-3.3-70b-versatile",  # Best Groq model
             messages=[
                 {
                     "role": "system",
-                    "content": "You are a helpful educational assistant. Provide clear, detailed explanations suitable for study notes."
+                    "content": "You are an expert educational assistant. Provide clear, detailed explanations suitable for study notes. Use Markdown formatting with headings (##), bullet points, and code blocks where appropriate. Be comprehensive but concise."
                 },
                 {
                     "role": "user",
-                    "content": f"Provide a clear, detailed explanation of: {topic_name}. Format the response using Markdown with headings, bullet points, and code blocks where appropriate."
+                    "content": f"Provide a comprehensive explanation of: {topic_name}. Include: 1) Overview, 2) Key concepts, 3) Practical examples, 4) Common use cases or applications. Format using Markdown."
                 }
             ],
             temperature=0.7,
-            max_tokens=1000
+            max_tokens=1500,
+            top_p=1,
+            stream=False
         )
         
         return response.choices[0].message.content
     except Exception as e:
-        return f"# {topic_name}\n\nError generating AI explanation: {str(e)}\n\nPlease check your GROQ_API_KEY in settings or try again later."
+        error_msg = str(e)
+        return f"""# {topic_name}
+
+## Error Generating AI Content
+
+**Error:** {error_msg}
+
+**Troubleshooting:**
+1. Check your GROQ_API_KEY in settings
+2. Verify API key is valid at https://console.groq.com
+3. Ensure you have internet connectivity
+4. Check Groq API status at https://status.groq.com
+
+**Manual Entry:**
+Please write your explanation manually or try the AI generation again after fixing the configuration.
+"""
 
 
 def improve_explanation(current_explanation):
-    """Improve existing explanation using Groq API (Free)"""
+    """Improve existing explanation using Groq API"""
     client = _get_groq_client()
     
     if not client:
-        return f"{current_explanation}\n\n---\n\n*Note: AI improvement requires GROQ_API_KEY configuration. Get free key from https://console.groq.com*"
+        return f"""{current_explanation}
+
+---
+
+**💡 AI Improvement Available**
+
+Configure GROQ_API_KEY to enable AI-powered explanation improvements. Get your free key from https://console.groq.com
+"""
     
     try:
         response = client.chat.completions.create(
-            model="llama3-8b-8192",  # Fast and free Groq model
+            model="llama-3.3-70b-versatile",
             messages=[
                 {
                     "role": "system",
-                    "content": "You are a helpful educational assistant. Improve explanations for clarity, structure, and educational value."
+                    "content": "You are an expert editor and educational content improver. Enhance explanations for clarity, structure, accuracy, and educational value. Maintain Markdown formatting. Add examples where helpful."
                 },
                 {
                     "role": "user",
-                    "content": f"Improve the following explanation for clarity, structure, and educational value. Keep the same format (Markdown):\n\n{current_explanation}"
+                    "content": f"Improve the following explanation for better clarity, structure, and educational value. Add relevant examples if missing. Keep Markdown format:\n\n{current_explanation}"
                 }
             ],
             temperature=0.7,
-            max_tokens=1500
+            max_tokens=2000,
+            top_p=1,
+            stream=False
         )
         
         return response.choices[0].message.content
     except Exception as e:
-        return f"{current_explanation}\n\n---\n\n*Error improving explanation: {str(e)}*"
+        return f"""{current_explanation}
+
+---
+
+**⚠️ AI Improvement Error:** {str(e)}
+
+Please check your Groq API configuration or improve the content manually.
+"""
 
 
 def summarize_explanation(explanation):
-    """Summarize explanation to key points using Groq API (Free)"""
+    """Summarize explanation to key points using Groq API"""
     client = _get_groq_client()
     
     if not client:
-        return f"## Key Points\n\n• Main concept from the explanation\n• Important detail\n• Practical application\n\n*Note: AI summarization requires GROQ_API_KEY configuration. Get free key from https://console.groq.com*"
+        return f"""## Key Points Summary
+
+• Main concept from the explanation
+• Important detail to remember
+• Practical application
+• Key takeaway
+
+---
+
+**Note:** AI summarization requires GROQ_API_KEY configuration. Get free key from https://console.groq.com
+"""
     
     try:
         response = client.chat.completions.create(
-            model="llama3-8b-8192",  # Fast and free Groq model
+            model="llama-3.3-70b-versatile",
             messages=[
                 {
                     "role": "system",
-                    "content": "You are a helpful educational assistant. Summarize content into clear, concise key points."
+                    "content": "You are an expert at creating concise summaries. Extract and present the most important points in clear bullet format. Use Markdown."
                 },
                 {
                     "role": "user",
-                    "content": f"Summarize the following explanation into key points (use bullet points with Markdown):\n\n{explanation}"
+                    "content": f"Summarize the following explanation into 4-8 key bullet points. Focus on the most important concepts and practical takeaways:\n\n{explanation}"
                 }
             ],
             temperature=0.5,
-            max_tokens=500
+            max_tokens=800,
+            top_p=1,
+            stream=False
         )
         
         return response.choices[0].message.content
     except Exception as e:
-        return f"## Key Points\n\n• Error summarizing: {str(e)}\n• Please try again or summarize manually."
+        return f"""## Summary Error
+
+**Error:** {str(e)}
+
+**Original Length:** {len(explanation)} characters
+
+Please summarize manually or fix Groq API configuration.
+"""
 
 
 def generate_ai_code(topic_name, language='python'):
-    """Generate code example for a topic using Groq API (Free)"""
+    """Generate code example for a topic using Groq API"""
     client = _get_groq_client()
     
     if not client:
-        # Return a basic template
-        if language == 'python':
-            return f"# {topic_name} example\n\ndef example_function():\n    \"\"\"Example implementation\"\"\"\n    # TODO: Implement {topic_name}\n    pass\n\nif __name__ == '__main__':\n    example_function()"
-        else:
-            return f"// {topic_name} example\n// TODO: Implement {topic_name}\n\nfunction exampleFunction() {{\n    // Implementation here\n}}"
+        # Return language-specific template
+        templates = {
+            'python': f'''# {topic_name} Example
+"""
+Complete example demonstrating {topic_name}
+Configure Groq API to auto-generate this code
+"""
+
+def example_function():
+    """Implementation of {topic_name}"""
+    # TODO: Implement {topic_name}
+    pass
+
+if __name__ == '__main__':
+    example_function()
+''',
+            'javascript': f'''// {topic_name} Example
+// Configure Groq API to auto-generate code
+
+/**
+ * Example implementation of {topic_name}
+ */
+function exampleFunction() {{
+    // TODO: Implement {topic_name}
+}}
+
+exampleFunction();
+''',
+            'java': f'''// {topic_name} Example
+
+public class Example {{
+    /**
+     * Implementation of {topic_name}
+     */
+    public static void main(String[] args) {{
+        // TODO: Implement {topic_name}
+    }}
+}}
+''',
+        }
+        return templates.get(language, templates['python'])
     
     try:
         response = client.chat.completions.create(
-            model="llama3-8b-8192",  # Fast and free Groq model
+            model="llama-3.3-70b-versatile",
             messages=[
                 {
                     "role": "system",
-                    "content": f"You are a helpful coding assistant. Generate clean, well-commented code examples in {language}."
+                    "content": f"You are an expert {language} programmer. Generate clean, well-commented, production-ready code examples. Include docstrings/comments explaining the code. Follow {language} best practices."
                 },
                 {
                     "role": "user",
-                    "content": f"Generate a {language} code example demonstrating: {topic_name}. Include comments explaining the code."
+                    "content": f"Generate a complete, working {language} code example demonstrating: {topic_name}. Include:\n1) Clear comments explaining each part\n2) Error handling where appropriate\n3) Example usage\n4) Best practices\n\nProvide ONLY the code, no markdown formatting."
                 }
             ],
             temperature=0.7,
-            max_tokens=800
+            max_tokens=1200,
+            top_p=1,
+            stream=False
         )
         
-        return response.choices[0].message.content
+        code = response.choices[0].message.content
+        # Remove markdown code fences if present
+        code = re.sub(r'^```[\w]*\n|```$', '', code, flags=re.MULTILINE).strip()
+        return code
     except Exception as e:
-        if language == 'python':
-            return f"# {topic_name} example\n# Error generating code: {str(e)}\n\ndef example_function():\n    pass"
-        else:
-            return f"// {topic_name} example\n// Error generating code: {str(e)}\n\nfunction exampleFunction() {{\n    // Implementation here\n}}"
+        templates = {
+            'python': f'# {topic_name} Example\n# Error: {str(e)}\n\ndef example():\n    pass',
+            'javascript': f'// {topic_name} Example\n// Error: {str(e)}\n\nfunction example() {{\n    // Implementation\n}}',
+        }
+        return templates.get(language, f'// {topic_name}\n// Error: {str(e)}')

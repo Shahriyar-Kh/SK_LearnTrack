@@ -2,14 +2,14 @@
 # ============================================================================
 
 from django.db import models
-from accounts.models import User
+from django.conf import settings
 from courses.models import Course, Topic
 from notes.models import Note
 
 class Roadmap(models.Model):
     """User learning roadmaps"""
     
-    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='roadmaps')
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='roadmaps')
     title = models.CharField(max_length=255)
     description = models.TextField(blank=True)
     target_completion_date = models.DateField(null=True, blank=True)

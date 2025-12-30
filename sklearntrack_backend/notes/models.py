@@ -4,7 +4,7 @@
 # ============================================================================
 
 from django.db import models
-from accounts.models import User
+from django.conf import settings
 from courses.models import Course, Topic as CourseTopic, Subtopic
 from django.utils.text import slugify
 
@@ -17,7 +17,12 @@ class Note(models.Model):
         ('published', 'Published'),
     )
     
-    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='notes')
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='notes'
+    )
+
     title = models.CharField(max_length=500)
     slug = models.SlugField(max_length=550, blank=True)
     
@@ -225,7 +230,11 @@ class AIGeneratedContent(models.Model):
         ('generate_code', 'Generate Code'),
     )
     
-    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='ai_generations')
+    user = models.ForeignKey(
+    settings.AUTH_USER_MODEL,
+    on_delete=models.CASCADE,
+    related_name='ai_generations')
+
     topic = models.ForeignKey(ChapterTopic, on_delete=models.CASCADE, related_name='ai_generations', null=True, blank=True)
     
     action_type = models.CharField(max_length=50, choices=AI_ACTIONS)
@@ -254,8 +263,8 @@ class NoteShare(models.Model):
     )
     
     note = models.ForeignKey(Note, on_delete=models.CASCADE, related_name='shares')
-    shared_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='shared_notes')
-    shared_with = models.ForeignKey(User, on_delete=models.CASCADE, related_name='received_notes', null=True, blank=True)
+    shared_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='shared_notes')
+    shared_with = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='received_notes', null=True, blank=True)
     
     permission = models.CharField(max_length=10, choices=PERMISSION_CHOICES, default='view')
     is_public = models.BooleanField(default=False)

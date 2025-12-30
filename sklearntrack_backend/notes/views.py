@@ -1,17 +1,17 @@
-# FILE: notes/views.py
+# FILE: notes/views.py - FINAL FIX
 # ============================================================================
 
 from rest_framework import viewsets, permissions, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
-from django.db import transaction
+from django.db import transaction, connection
 from django.db.models import Q, Count, Prefetch, Max
-from django.db.utils import ProgrammingError
+from django.http import HttpResponse
 from django.core.files.storage import default_storage
 from django.core.files.base import ContentFile
-from django.conf import settings
-import os
+from django.utils import timezone
 from uuid import uuid4
+import os
 
 from .models import (
     Note, Chapter, ChapterTopic, TopicExplanation,
@@ -67,6 +67,9 @@ class NoteViewSet(viewsets.ModelViewSet):
     
     def update(self, request, *args, **kwargs):
         """Update note with unique title validation"""
+        # Get partial parameter
+        partial = kwargs.pop('partial', False)
+        
         title = request.data.get('title', '').strip()
         note = self.get_object()
         
@@ -83,7 +86,12 @@ class NoteViewSet(viewsets.ModelViewSet):
                     status=status.HTTP_400_BAD_REQUEST
                 )
         
-        return super().update(request, *args, **kwargs)
+        # Get the serializer
+        serializer = self.get_serializer(note, data=request.data, partial=partial)
+        serializer.is_valid(raise_exception=True)
+        self.perform_update(serializer)
+        
+        return Response(serializer.data)
     
     def get_queryset(self):
         queryset = Note.objects.filter(user=self.request.user).prefetch_related(
@@ -172,9 +180,6 @@ class NoteViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['post'])
     def export_pdf(self, request, pk=None):
         """Export note to PDF with proper formatting"""
-        from django.http import HttpResponse
-        from django.utils import timezone
-        
         note = self.get_object()
         
         try:
@@ -274,18 +279,40 @@ class NoteViewSet(viewsets.ModelViewSet):
             changes_summary=f"Auto-save at {note.updated_at}"
         )
     
-    def destroy(self, request, pk=None):
-        """Delete note with proper cascade deletion"""
+    def destroy(self, request, *args, **kwargs):
+        """Delete note with proper cascade deletion - FIXED for roadmap_tasks issue"""
         note = self.get_object()
+        note_title = note.title
         
         try:
             with transaction.atomic():
-                # Manually delete all related objects to avoid foreign key issues
-                # Delete chapters (which will cascade to topics via CASCADE)
+                # Check if roadmap_tasks table exists
+                with connection.cursor() as cursor:
+                    cursor.execute("""
+                        SELECT EXISTS (
+                            SELECT FROM information_schema.tables 
+                            WHERE table_name = 'roadmap_tasks'
+                        );
+                    """)
+                    roadmap_tasks_exists = cursor.fetchone()[0]
+                
+                # If roadmap_tasks exists, clear the foreign key reference
+                if roadmap_tasks_exists:
+                    with connection.cursor() as cursor:
+                        cursor.execute(
+                            "UPDATE roadmap_tasks SET note_id = NULL WHERE note_id = %s;",
+                            [note.id]
+                        )
+                
+                # Get all topic IDs for AI content deletion
+                topic_ids = list(ChapterTopic.objects.filter(
+                    chapter__note=note
+                ).values_list('id', flat=True))
+                
+                # Delete all chapters and their topics
                 for chapter in note.chapters.all():
-                    # Delete topics and their related objects
                     for topic in chapter.topics.all():
-                        # Delete related objects explicitly
+                        # Delete related objects
                         if topic.explanation:
                             topic.explanation.delete()
                         if topic.code_snippet:
@@ -295,28 +322,35 @@ class NoteViewSet(viewsets.ModelViewSet):
                         topic.delete()
                     chapter.delete()
                 
+                # Delete AI generated content
+                AIGeneratedContent.objects.filter(topic_id__in=topic_ids).delete()
+                
                 # Delete note versions
                 note.versions.all().delete()
-                
-                # Delete AI generated content related to this note's topics
-                from .models import AIGeneratedContent
-                topic_ids = ChapterTopic.objects.filter(
-                    chapter__note=note
-                ).values_list('id', flat=True)
-                AIGeneratedContent.objects.filter(topic_id__in=topic_ids).delete()
                 
                 # Delete note shares
                 note.shares.all().delete()
                 
-                # Finally delete the note
+                # Delete the note
                 note.delete()
-                
-            return Response(status=status.HTTP_204_NO_CONTENT)
+            
+            return Response(
+                {
+                    'message': f'Note "{note_title}" has been successfully deleted.',
+                    'success': True
+                },
+                status=status.HTTP_200_OK
+            )
         except Exception as e:
             import traceback
             error_details = traceback.format_exc()
+            print(f"Error deleting note: {error_details}")
             return Response(
-                {'error': f'Failed to delete note: {str(e)}', 'details': error_details},
+                {
+                    'error': f'Failed to delete note: {str(e)}',
+                    'details': error_details,
+                    'success': False
+                },
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
     
@@ -408,7 +442,7 @@ class ChapterViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST
             )
         
-        # Get next order number - handle None case properly
+        # Get next order number
         max_order_result = Chapter.objects.filter(note=note).aggregate(
             max_order=Max('order')
         )
@@ -429,6 +463,53 @@ class ChapterViewSet(viewsets.ModelViewSet):
         
         serializer = self.get_serializer(chapter)
         return Response(serializer.data, status=status.HTTP_201_CREATED)
+    
+    def update(self, request, *args, **kwargs):
+        """Update chapter - support both PUT and PATCH"""
+        partial = kwargs.pop('partial', False)
+        chapter = self.get_object()
+        
+        serializer = self.get_serializer(chapter, data=request.data, partial=partial)
+        serializer.is_valid(raise_exception=True)
+        self.perform_update(serializer)
+        
+        return Response(serializer.data)
+    
+    def destroy(self, request, *args, **kwargs):
+        """Delete chapter with all its topics"""
+        chapter = self.get_object()
+        chapter_title = chapter.title
+        
+        try:
+            with transaction.atomic():
+                # Delete all topics and their related objects
+                for topic in chapter.topics.all():
+                    if topic.explanation:
+                        topic.explanation.delete()
+                    if topic.code_snippet:
+                        topic.code_snippet.delete()
+                    if topic.source:
+                        topic.source.delete()
+                    topic.delete()
+                
+                # Delete the chapter
+                chapter.delete()
+            
+            return Response(
+                {
+                    'message': f'Chapter "{chapter_title}" has been successfully deleted.',
+                    'success': True
+                },
+                status=status.HTTP_200_OK
+            )
+        except Exception as e:
+            return Response(
+                {
+                    'error': f'Failed to delete chapter: {str(e)}',
+                    'success': False
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
     
     @action(detail=True, methods=['post'])
     def reorder(self, request, pk=None):
@@ -472,7 +553,7 @@ class TopicViewSet(viewsets.ModelViewSet):
             )
         
         with transaction.atomic():
-            # Calculate next order number for topic
+            # Calculate next order number
             max_order_result = ChapterTopic.objects.filter(chapter=chapter).aggregate(
                 max_order=Max('order')
             )
@@ -514,10 +595,13 @@ class TopicViewSet(viewsets.ModelViewSet):
         response_serializer = ChapterTopicSerializer(topic)
         return Response(response_serializer.data, status=status.HTTP_201_CREATED)
     
-    def update(self, request, pk=None):
-        """Update topic and its components"""
+    def update(self, request, *args, **kwargs):
+        """Update topic and its components - FIXED partial parameter"""
+        # Handle partial parameter correctly
+        partial = kwargs.pop('partial', False)
+        
         topic = self.get_object()
-        serializer = TopicUpdateSerializer(data=request.data)
+        serializer = TopicUpdateSerializer(data=request.data, partial=True)  # Always allow partial
         serializer.is_valid(raise_exception=True)
         
         data = serializer.validated_data
@@ -573,9 +657,43 @@ class TopicViewSet(viewsets.ModelViewSet):
         response_serializer = ChapterTopicSerializer(topic)
         return Response(response_serializer.data)
     
+    def destroy(self, request, *args, **kwargs):
+        """Delete topic with all its related objects"""
+        topic = self.get_object()
+        topic_name = topic.name
+        
+        try:
+            with transaction.atomic():
+                # Delete related objects
+                if topic.explanation:
+                    topic.explanation.delete()
+                if topic.code_snippet:
+                    topic.code_snippet.delete()
+                if topic.source:
+                    topic.source.delete()
+                
+                # Delete the topic
+                topic.delete()
+            
+            return Response(
+                {
+                    'message': f'Topic "{topic_name}" has been successfully deleted.',
+                    'success': True
+                },
+                status=status.HTTP_200_OK
+            )
+        except Exception as e:
+            return Response(
+                {
+                    'error': f'Failed to delete topic: {str(e)}',
+                    'success': False
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+    
     @action(detail=True, methods=['post'])
     def ai_action(self, request, pk=None):
-        """Perform AI action on topic"""
+        """Perform AI action on topic using Groq"""
         topic = self.get_object()
         serializer = AIActionSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -583,32 +701,47 @@ class TopicViewSet(viewsets.ModelViewSet):
         action_type = serializer.validated_data['action_type']
         input_content = serializer.validated_data['input_content']
         
-        # Perform AI action
-        generated_content = None
-        
-        if action_type == 'generate_explanation':
-            generated_content = generate_ai_explanation(input_content)
-        elif action_type == 'improve_explanation':
-            generated_content = improve_explanation(input_content)
-        elif action_type == 'summarize_explanation':
-            generated_content = summarize_explanation(input_content)
-        elif action_type == 'generate_code':
-            language = serializer.validated_data.get('language', 'python')
-            generated_content = generate_ai_code(input_content, language)
-        
-        # Save AI generation record
-        AIGeneratedContent.objects.create(
-            user=request.user,
-            topic=topic,
-            action_type=action_type,
-            input_content=input_content,
-            generated_content=generated_content
-        )
-        
-        return Response({
-            'generated_content': generated_content,
-            'action_type': action_type
-        })
+        try:
+            # Perform AI action
+            generated_content = None
+            
+            if action_type == 'generate_explanation':
+                generated_content = generate_ai_explanation(input_content)
+            elif action_type == 'improve_explanation':
+                generated_content = improve_explanation(input_content)
+            elif action_type == 'summarize_explanation':
+                generated_content = summarize_explanation(input_content)
+            elif action_type == 'generate_code':
+                language = serializer.validated_data.get('language', 'python')
+                generated_content = generate_ai_code(input_content, language)
+            
+            # Save AI generation record
+            AIGeneratedContent.objects.create(
+                user=request.user,
+                topic=topic,
+                action_type=action_type,
+                input_content=input_content,
+                generated_content=generated_content,
+                model_used='llama-3.3-70b-versatile'
+            )
+            
+            return Response({
+                'generated_content': generated_content,
+                'action_type': action_type,
+                'success': True
+            })
+        except Exception as e:
+            import traceback
+            error_details = traceback.format_exc()
+            print(f"AI Action Error: {error_details}")
+            return Response(
+                {
+                    'error': f'AI action failed: {str(e)}',
+                    'details': error_details,
+                    'success': False
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
     
     @action(detail=True, methods=['post'])
     def reorder(self, request, pk=None):

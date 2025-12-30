@@ -2,7 +2,7 @@
 # ============================================================================
 
 from django.db import models
-from accounts.models import User
+from django.conf import settings
 
 class Course(models.Model):
     """Admin-created courses (W3Schools style)"""
@@ -22,7 +22,7 @@ class Course(models.Model):
     tags = models.JSONField(default=list)
     
     is_published = models.BooleanField(default=False)
-    created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True)
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True)
     
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -121,7 +121,7 @@ class Exercise(models.Model):
 class Enrollment(models.Model):
     """User course enrollments"""
     
-    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='enrollments')
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='enrollments')
     course = models.ForeignKey(Course, on_delete=models.CASCADE, related_name='enrollments')
     
     progress_percentage = models.DecimalField(max_digits=5, decimal_places=2, default=0)
@@ -141,7 +141,7 @@ class Enrollment(models.Model):
 class SubtopicProgress(models.Model):
     """Track user progress on subtopics"""
     
-    user = models.ForeignKey(User, on_delete=models.CASCADE)
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
     subtopic = models.ForeignKey(Subtopic, on_delete=models.CASCADE)
     completed = models.BooleanField(default=False)
     bookmarked = models.BooleanField(default=False)
@@ -158,7 +158,7 @@ class SubtopicProgress(models.Model):
 class PersonalCourse(models.Model):
     """User-created courses for external learning"""
     
-    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='personal_courses')
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='personal_courses')
     title = models.CharField(max_length=255)
     description = models.TextField(blank=True)
     source = models.CharField(max_length=255, help_text='Website, book, etc.')

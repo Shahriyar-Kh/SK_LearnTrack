@@ -186,22 +186,47 @@ CELERY_BROKER_URL = config('CELERY_BROKER_URL', default='redis://localhost:6379/
 CELERY_RESULT_BACKEND = config('CELERY_RESULT_BACKEND', default='redis://localhost:6379/0')
 CELERY_ACCEPT_CONTENT = ['json']
 
-# Groq API Configuration (Free AI alternative to OpenAI)
-# Get your free API key from https://console.groq.com
+# Groq API for AI Features (Free & Fast)
+# Get your free API key from: https://console.groq.com
 GROQ_API_KEY = config('GROQ_API_KEY', default='')
-# Fallback to OpenAI for backward compatibility
-OPENAI_API_KEY = config('OPENAI_API_KEY', default='')
-CELERY_TASK_SERIALIZER = 'json'
-CELERY_RESULT_SERIALIZER = 'json'
-CELERY_TIMEZONE = TIME_ZONE
 
-# Logging Configuration
+# Fallback to OpenAI if needed (optional)
+OPENAI_API_KEY = config('OPENAI_API_KEY', default='')
+
+# AI Configuration
+AI_SETTINGS = {
+    'DEFAULT_MODEL': 'llama-3.3-70b-versatile',  # Best Groq model
+    'MAX_TOKENS': 2000,
+    'TEMPERATURE': 0.7,
+    'CACHE_TIMEOUT': 3600,  # Cache AI responses for 1 hour
+}
+
+# ============================================================================
+# LOGGING CONFIGURATION - Update for better debugging
+# ============================================================================
+
 LOGGING = {
     'version': 1,
     'disable_existing_loggers': False,
+    'formatters': {
+        'verbose': {
+            'format': '{levelname} {asctime} {module} {message}',
+            'style': '{',
+        },
+        'simple': {
+            'format': '{levelname} {message}',
+            'style': '{',
+        },
+    },
     'handlers': {
         'console': {
             'class': 'logging.StreamHandler',
+            'formatter': 'verbose',
+        },
+        'file': {
+            'class': 'logging.FileHandler',
+            'filename': BASE_DIR / 'logs' / 'django.log',
+            'formatter': 'verbose',
         },
     },
     'root': {
@@ -210,11 +235,38 @@ LOGGING = {
     },
     'loggers': {
         'django': {
-            'handlers': ['console'],
+            'handlers': ['console', 'file'],
             'level': 'INFO',
+            'propagate': False,
+        },
+        'notes': {
+            'handlers': ['console', 'file'],
+            'level': 'DEBUG',
             'propagate': False,
         },
     },
 }
+# ============================================================================
+# MEDIA FILES - For PDF exports and images
+# ============================================================================
+
+MEDIA_URL = '/media/'
+MEDIA_ROOT = BASE_DIR / 'media'
+
+# Create media directory structure
+(MEDIA_ROOT / 'notes' / 'images').mkdir(parents=True, exist_ok=True)
+(MEDIA_ROOT / 'notes' / 'pdfs').mkdir(parents=True, exist_ok=True)
+
+# ============================================================================
+# FILE UPLOAD SETTINGS
+# ============================================================================
+
+FILE_UPLOAD_MAX_MEMORY_SIZE = 5242880  # 5MB
+DATA_UPLOAD_MAX_MEMORY_SIZE = 5242880  # 5MB
+
+# Allowed file extensions
+ALLOWED_IMAGE_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.gif', '.webp']
+ALLOWED_DOCUMENT_EXTENSIONS = ['.pdf', '.doc', '.docx', '.txt']
+
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
