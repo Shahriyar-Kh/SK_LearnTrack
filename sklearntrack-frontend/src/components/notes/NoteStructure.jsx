@@ -30,8 +30,26 @@ const NoteStructure = ({ note, onUpdate }) => {
   };
 
   const saveEdit = async () => {
-    await onUpdate(editingItem.type, editingItem.id, editValue);
+    if (!editValue.trim()) {
+      cancelEdit();
+      return;
+    }
+    
+    // Call the update handler with the correct structure
+    if (editingItem.type === 'chapter') {
+      await onUpdate('chapter', { id: editingItem.id, title: editValue });
+    } else if (editingItem.type === 'topic') {
+      await onUpdate('topic', { id: editingItem.id, name: editValue });
+    }
     cancelEdit();
+  };
+
+  const handleKeyPress = (e) => {
+    if (e.key === 'Enter') {
+      saveEdit();
+    } else if (e.key === 'Escape') {
+      cancelEdit();
+    }
   };
 
   return (
@@ -77,18 +95,21 @@ const NoteStructure = ({ note, onUpdate }) => {
                     type="text"
                     value={editValue}
                     onChange={(e) => setEditValue(e.target.value)}
-                    className="flex-1 px-2 py-1 text-sm border dark:border-gray-600 rounded bg-white dark:bg-gray-900"
+                    onKeyDown={handleKeyPress}
+                    className="flex-1 px-2 py-1 text-sm border dark:border-gray-600 rounded bg-white dark:bg-gray-900 focus:ring-2 focus:ring-blue-500"
                     autoFocus
                   />
                   <button
                     onClick={saveEdit}
-                    className="p-1 text-green-600 hover:bg-green-50 rounded"
+                    className="p-1 text-green-600 hover:bg-green-50 rounded transition"
+                    title="Save"
                   >
                     <Save size={14} />
                   </button>
                   <button
                     onClick={cancelEdit}
-                    className="p-1 text-gray-600 hover:bg-gray-100 rounded"
+                    className="p-1 text-gray-600 hover:bg-gray-100 rounded transition"
+                    title="Cancel"
                   >
                     <X size={14} />
                   </button>
@@ -98,22 +119,33 @@ const NoteStructure = ({ note, onUpdate }) => {
                   <span className="flex-1 font-medium text-sm">
                     {chapter.title}
                   </span>
-                  <div className="opacity-0 group-hover:opacity-100 flex items-center gap-1">
+                  <div className="opacity-0 group-hover:opacity-100 flex items-center gap-1 transition-opacity">
                     <button
-                      onClick={() => startEdit('chapter', chapter.id, chapter.title)}
-                      className="p-1 hover:bg-gray-200 dark:hover:bg-gray-600 rounded"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        startEdit('chapter', chapter.id, chapter.title);
+                      }}
+                      className="p-1 hover:bg-gray-200 dark:hover:bg-gray-600 rounded transition"
+                      title="Edit Chapter"
                     >
                       <Edit size={14} />
                     </button>
                     <button 
-                      onClick={() => onUpdate('delete-chapter', chapter.id)}
-                      className="p-1 hover:bg-red-100 text-red-600 rounded"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onUpdate('delete-chapter', chapter.id);
+                      }}
+                      className="p-1 hover:bg-red-100 text-red-600 rounded transition"
+                      title="Delete Chapter"
                     >
                       <Trash2 size={14} />
                     </button>
                     <button 
-                      onClick={() => onUpdate('add-topic', chapter.id)}
-                      className="p-1 hover:bg-blue-100 text-blue-600 rounded"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onUpdate('add-topic', chapter.id);
+                      }}
+                      className="p-1 hover:bg-blue-100 text-blue-600 rounded transition"
                       title="Add Topic"
                     >
                       <Plus size={14} />
@@ -147,18 +179,21 @@ const NoteStructure = ({ note, onUpdate }) => {
                           type="text"
                           value={editValue}
                           onChange={(e) => setEditValue(e.target.value)}
-                          className="flex-1 px-2 py-1 text-sm border dark:border-gray-600 rounded bg-white dark:bg-gray-900"
+                          onKeyDown={handleKeyPress}
+                          className="flex-1 px-2 py-1 text-sm border dark:border-gray-600 rounded bg-white dark:bg-gray-900 focus:ring-2 focus:ring-blue-500"
                           autoFocus
                         />
                         <button
                           onClick={saveEdit}
-                          className="p-1 text-green-600 hover:bg-green-50 rounded"
+                          className="p-1 text-green-600 hover:bg-green-50 rounded transition"
+                          title="Save"
                         >
                           <Save size={14} />
                         </button>
                         <button
                           onClick={cancelEdit}
-                          className="p-1 text-gray-600 hover:bg-gray-100 rounded"
+                          className="p-1 text-gray-600 hover:bg-gray-100 rounded transition"
+                          title="Cancel"
                         >
                           <X size={14} />
                         </button>
@@ -186,23 +221,34 @@ const NoteStructure = ({ note, onUpdate }) => {
                           )}
                         </div>
 
-                        <div className="opacity-0 group-hover:opacity-100 flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+                        <div className="opacity-0 group-hover:opacity-100 flex items-center gap-1 transition-opacity" onClick={(e) => e.stopPropagation()}>
                           <button
-                            onClick={() => startEdit('topic', topic.id, topic.name)}
-                            className="p-1 hover:bg-gray-200 dark:hover:bg-gray-600 rounded"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              startEdit('topic', topic.id, topic.name);
+                            }}
+                            className="p-1 hover:bg-gray-200 dark:hover:bg-gray-600 rounded transition"
+                            title="Edit Topic"
                           >
                             <Edit size={14} />
                           </button>
                           <button 
-                            onClick={() => onUpdate('ai-topic', topic.id)}
-                            className="p-1 hover:bg-purple-100 text-purple-600 rounded" 
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onUpdate('ai-topic', topic.id);
+                            }}
+                            className="p-1 hover:bg-purple-100 text-purple-600 rounded transition" 
                             title="AI Actions"
                           >
                             <Wand2 size={14} />
                           </button>
                           <button 
-                            onClick={() => onUpdate('delete-topic', topic.id)}
-                            className="p-1 hover:bg-red-100 text-red-600 rounded"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onUpdate('delete-topic', topic.id);
+                            }}
+                            className="p-1 hover:bg-red-100 text-red-600 rounded transition"
+                            title="Delete Topic"
                           >
                             <Trash2 size={14} />
                           </button>
@@ -226,7 +272,7 @@ const NoteStructure = ({ note, onUpdate }) => {
         ))}
       </div>
 
-      {!note.chapters || note.chapters.length === 0 && (
+      {(!note.chapters || note.chapters.length === 0) && (
         <div className="text-center py-8 text-gray-500">
           <FileText size={48} className="mx-auto mb-3 opacity-50" />
           <p className="text-sm">No chapters yet. Add your first chapter to get started.</p>
