@@ -4,5 +4,12 @@ logs
 venv/
 __pycache__/
 .env
+sklearntrack_backend/media/google_tokens/
 
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+# C extensions
+*.so
 
