@@ -1,12 +1,30 @@
 # FILE: notes/models.py - COMPLETE FIX WITH PROPER CASCADE
 # ============================================================================
 
+from datetime import timedelta
 from django.db import models
 from django.conf import settings
 from django.utils.text import slugify
 from courses.models import Course, Topic as CourseTopic, Subtopic
+# Add after imports, before model definitions
+from django.db import models
+from django.db.models import Q
+from django.db.models.functions import Lower
 
-
+class CaseInsensitiveManager(models.Manager):
+    """Manager for case-insensitive uniqueness checks"""
+    
+    def check_exists(self, field_name, value, exclude_id=None, **filters):
+        """Check if a record exists with case-insensitive field value"""
+        qs = self.filter(**filters).annotate(
+            lower_field=Lower(field_name)
+        ).filter(lower_field=value.lower())
+        
+        if exclude_id:
+            qs = qs.exclude(id=exclude_id)
+        
+        return qs.exists()
+    
 class Note(models.Model):
     """Main Note container with chapters"""
     
@@ -51,6 +69,15 @@ class Note(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     session_date = models.DateField(null=True, blank=True)
+    objects = CaseInsensitiveManager()
+        # Google Drive Integration
+    drive_file_id = models.CharField(max_length=255, blank=True, null=True)
+    last_drive_sync_at = models.DateTimeField(null=True, blank=True)
+    upload_type = models.CharField(
+        max_length=20,
+        choices=(('manual', 'Manual'), ('auto', 'Automatic')),
+        default='manual'
+    )
     
     class Meta:
         db_table = 'notes'
@@ -66,6 +93,7 @@ class Note(models.Model):
             )
         ]
     
+    
     def save(self, *args, **kwargs):
         if not self.slug:
             self.slug = slugify(self.title)[:500]
@@ -73,6 +101,14 @@ class Note(models.Model):
     
     def __str__(self):
         return self.title
+    
+    def needs_drive_sync(self):
+        """Check if note needs to be synced to Drive"""
+        if not self.last_drive_sync_at:
+            return True
+        # If updated after last sync + 5 minutes, needs sync
+        sync_threshold = self.last_drive_sync_at + timedelta(minutes=5)
+        return self.updated_at > sync_threshold
 
 
 class Chapter(models.Model):
@@ -88,11 +124,23 @@ class Chapter(models.Model):
     
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
-    
+    objects = CaseInsensitiveManager()
     class Meta:
         db_table = 'note_chapters'
         ordering = ['order', 'created_at']
-        unique_together = ['note', 'order']
+        constraints = [
+            # Unique chapter title per note (case-insensitive)
+            models.UniqueConstraint(
+                fields=['note', 'title'],
+                name='unique_chapter_per_note'
+            ),
+            # Unique order per note
+            models.UniqueConstraint(
+                fields=['note', 'order'],
+                name='unique_chapter_order_per_note'
+            )
+        ]
+        
     
     def __str__(self):
         return f"{self.note.title} - {self.title}"
@@ -199,11 +247,23 @@ class ChapterTopic(models.Model):
     
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+    objects = CaseInsensitiveManager()
     
     class Meta:
         db_table = 'chapter_topics'
         ordering = ['order', 'created_at']
-        unique_together = ['chapter', 'order']
+        constraints = [
+            # Unique topic name per chapter (case-insensitive)
+            models.UniqueConstraint(
+                fields=['chapter', 'name'],
+                name='unique_topic_per_chapter'
+            ),
+            # Unique order per chapter
+            models.UniqueConstraint(
+                fields=['chapter', 'order'],
+                name='unique_topic_order_per_chapter'
+            )
+        ]
     
     def __str__(self):
         return f"{self.chapter.title} - {self.name}"

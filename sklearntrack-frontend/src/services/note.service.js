@@ -45,26 +45,89 @@ export const noteService = {
     return response.data;
   },
 
-  // Export note to PDF
-  exportNotePDF: async (id) => {
-    const response = await api.post(API_ENDPOINTS.NOTE_EXPORT_PDF(id), {}, {
-      responseType: 'blob'
+ // Export note to PDF - FIXED VERSION
+exportNotePDF: async (id, noteTitle) => {
+  try {
+    const response = await api.post(`/api/notes/${id}/export_pdf/`, {}, {
+      responseType: 'blob',
+      timeout: 30000
     });
+
+    // Check if it's a PDF by checking the content type or data type
+    const contentType = response.headers['content-type'];
+    const isPDF = contentType && contentType.includes('application/pdf');
     
-    // Create blob URL and trigger download
+    // Check if response status is successful (200-299)
+    const isSuccess = response.status >= 200 && response.status < 300;
+    
+    if (!isSuccess || !isPDF) {
+      // Try to parse as error JSON
+      const errorText = await response.data.text();
+      try {
+        const errorData = JSON.parse(errorText);
+        throw new Error(errorData.error || errorData.message || 'Failed to export PDF');
+      } catch {
+        throw new Error(`Server returned ${response.status}: ${errorText.substring(0, 100)}`);
+      }
+    }
+
+    // Create filename
+    const safeTitle = (noteTitle || 'note').replace(/[^a-zA-Z0-9]/g, '_');
+    const date = new Date().toISOString().split('T')[0];
+    const filename = `${safeTitle}_${date}.pdf`;
+
+    // Create blob and download
     const blob = new Blob([response.data], { type: 'application/pdf' });
     const url = window.URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.setAttribute('download', `note_${id}_${new Date().toISOString().split('T')[0]}.pdf`);
+    link.download = filename;
     document.body.appendChild(link);
     link.click();
-    link.remove();
-    window.URL.revokeObjectURL(url);
     
-    return { success: true };
-  },
+    // Cleanup
+    setTimeout(() => {
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+    }, 100);
 
+    return { success: true, filename };
+
+  } catch (error) {
+    console.error('PDF export error:', error);
+    
+    // Check if it's a timeout error
+    if (error.code === 'ECONNABORTED' || error.message.includes('timeout')) {
+      throw new Error('PDF generation is taking too long. Please try again.');
+    }
+    
+    // Check if it's a network error vs server error
+    if (error.message === 'Network Error' || !error.response) {
+      throw new Error('Network error. Please check your connection.');
+    }
+    
+    // Try to get error message from response
+    if (error.response && error.response.data) {
+      try {
+        // If it's a blob, convert to text
+        if (error.response.data instanceof Blob) {
+          const errorText = await error.response.data.text();
+          const errorData = JSON.parse(errorText);
+          throw new Error(errorData.error || errorData.message || 'Failed to export PDF');
+        }
+        // If it's already an object
+        else if (typeof error.response.data === 'object') {
+          throw new Error(error.response.data.error || error.response.data.message || 'Failed to export PDF');
+        }
+      } catch (e) {
+        // If we can't parse as JSON, use the original error
+        throw new Error(error.message || 'Failed to export PDF');
+      }
+    }
+    
+    throw error;
+  }
+},
   // ========================================================================
   // CHAPTERS
   // ========================================================================
@@ -173,6 +236,16 @@ export const noteService = {
     const response = await api.get(API_ENDPOINTS.SNIPPETS);
     return response.data;
   },
+    // Run code execution
+  runCode: async (codeData) => {
+    try {
+      const response = await api.post('/api/notes/run_code/', codeData);
+      return response.data;
+    } catch (error) {
+      console.error('Error running code:', error);
+      throw error;
+    }
+  },
 
   createSnippet: async (snippetData) => {
     const response = await api.post(API_ENDPOINTS.SNIPPETS, snippetData);
@@ -189,5 +262,6 @@ export const noteService = {
     return response.data;
   },
 };
+
 
 export default noteService;

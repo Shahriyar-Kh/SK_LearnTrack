@@ -1,17 +1,22 @@
 import { useState, useEffect } from 'react';
 import { 
   Save, X, Wand2, Code, Link, Plus, Trash2, 
-  FileText, Loader, CheckCircle, Sparkles
+  FileText, Loader, CheckCircle, Sparkles, Play, Terminal
 } from 'lucide-react';
 import ReactQuill from 'react-quill';
 import 'react-quill/dist/quill.snow.css';
 import Editor from '@monaco-editor/react';
+import ReactMarkdown from 'react-markdown';
+import { noteService } from '@/services/note.service';
 
 const TopicEditor = ({ topic, onSave, onCancel, onAIAction }) => {
   const [loading, setLoading] = useState(false);
   const [saved, setSaved] = useState(false);
   const [aiLoading, setAiLoading] = useState(null);
   const [error, setError] = useState(null);
+  const [runningCode, setRunningCode] = useState(false);
+  const [codeOutput, setCodeOutput] = useState('');
+  const [codeError, setCodeError] = useState('');
   
   const [formData, setFormData] = useState({
     name: topic?.name || '',
@@ -133,6 +138,38 @@ const TopicEditor = ({ topic, onSave, onCancel, onAIAction }) => {
     }
   };
 
+  const handleRunCode = async () => {
+    if (!formData.code.content.trim()) {
+      setCodeError('No code to run');
+      return;
+    }
+
+    setRunningCode(true);
+    setCodeOutput('');
+    setCodeError('');
+
+    try {
+      const result = await noteService.runCode({
+        code: formData.code.content,
+        language: formData.code.language
+      });
+      
+      if (result.success) {
+        setCodeOutput(result.output || 'Code executed successfully (no output)');
+        if (result.error) {
+          setCodeError(result.error);
+        }
+      } else {
+        setCodeError(result.error || 'Failed to execute code');
+      }
+    } catch (error) {
+      console.error('Code execution error:', error);
+      setCodeError(error.message || 'An error occurred while executing the code');
+    } finally {
+      setRunningCode(false);
+    }
+  };
+
   const handleAI = async (action) => {
     setError(null);
     setAiLoading(action);
@@ -152,6 +189,7 @@ const TopicEditor = ({ topic, onSave, onCancel, onAIAction }) => {
           code: { ...prev.code, content: result }
         }));
       } else {
+        // AI returns markdown, convert to HTML for Quill editor
         setFormData(prev => ({
           ...prev,
           explanation: result
@@ -164,6 +202,29 @@ const TopicEditor = ({ topic, onSave, onCancel, onAIAction }) => {
     } finally {
       setAiLoading(null);
     }
+  };
+  //  helper funtion for markdown conversion
+  const convertToHtml = (markdown) => {
+  if (!markdown) return '';
+  
+  // Convert markdown to basic HTML
+  let html = markdown
+    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+    .replace(/\*(.*?)\*/g, '<em>$1</em>')
+    .replace(/`(.*?)`/g, '<code>$1</code>')
+    .replace(/^\s*#\s+(.*)$/gm, '<h1>$1</h1>')
+    .replace(/^\s*##\s+(.*)$/gm, '<h2>$1</h2>')
+    .replace(/^\s*###\s+(.*)$/gm, '<h3>$1</h3>')
+    .replace(/^\s*-\s+(.*)$/gm, '<li>$1</li>')
+    .replace(/^\s*\*\s+(.*)$/gm, '<li>$1</li>')
+    .replace(/\n/g, '<br/>');
+  
+  return html;
+};
+
+  const clearCodeOutput = () => {
+    setCodeOutput('');
+    setCodeError('');
   };
 
   return (
@@ -280,7 +341,7 @@ const TopicEditor = ({ topic, onSave, onCancel, onAIAction }) => {
         </p>
       </div>
 
-      {/* Code Snippet Section with Monaco Editor */}
+      {/* Code Snippet Section with Monaco Editor and Run Button */}
       <div className="border dark:border-gray-700 rounded-lg p-4">
         <div className="flex items-center justify-between mb-3">
           <label className="text-sm font-medium flex items-center gap-2">
@@ -314,9 +375,21 @@ const TopicEditor = ({ topic, onSave, onCancel, onAIAction }) => {
               )}
               Generate Code
             </button>
+            <button
+              onClick={handleRunCode}
+              disabled={runningCode || !formData.code.content}
+              className="flex items-center gap-1 px-3 py-1 text-xs bg-green-100 text-green-700 rounded hover:bg-green-200 disabled:opacity-50"
+            >
+              {runningCode ? (
+                <Loader size={14} className="animate-spin" />
+              ) : (
+                <Play size={14} />
+              )}
+              Run Code
+            </button>
           </div>
         </div>
-        <div className="border dark:border-gray-600 rounded-lg overflow-hidden" style={{ height: '400px' }}>
+        <div className="border dark:border-gray-600 rounded-lg overflow-hidden" style={{ height: '300px' }}>
           <Editor
             height="100%"
             language={getMonacoLanguage(formData.code.language)}
@@ -339,6 +412,53 @@ const TopicEditor = ({ topic, onSave, onCancel, onAIAction }) => {
             }}
           />
         </div>
+
+        {/* Code Output Section */}
+        {(codeOutput || codeError) && (
+          <div className="mt-4 border dark:border-gray-600 rounded-lg overflow-hidden">
+            <div className="flex items-center justify-between bg-gray-800 px-4 py-2">
+              <div className="flex items-center gap-2">
+                <Terminal size={16} className="text-green-400" />
+                <span className="text-white text-sm font-medium">Output</span>
+              </div>
+              <button
+                onClick={clearCodeOutput}
+                className="text-gray-400 hover:text-white"
+              >
+                <X size={14} />
+              </button>
+            </div>
+            <div className="bg-gray-900 text-white p-4 font-mono text-sm">
+              {codeError ? (
+                <div className="text-red-400">
+                  <div className="flex items-center gap-2 mb-1">
+                    <Terminal size={12} />
+                    <span className="font-medium">Error:</span>
+                  </div>
+                  <pre className="whitespace-pre-wrap">{codeError}</pre>
+                </div>
+              ) : (
+                <div className="text-green-400">
+                  <div className="flex items-center gap-2 mb-1">
+                    <Terminal size={12} />
+                    <span className="font-medium">Output:</span>
+                  </div>
+                  <pre className="whitespace-pre-wrap">{codeOutput}</pre>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Running Code Loading State */}
+        {runningCode && !codeOutput && !codeError && (
+          <div className="mt-4 p-4 bg-gray-900 rounded-lg">
+            <div className="flex items-center gap-3 text-green-400">
+              <Loader size={16} className="animate-spin" />
+              <span className="text-sm font-medium">Executing code...</span>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Source/Reference Section */}
@@ -385,9 +505,14 @@ const TopicEditor = ({ topic, onSave, onCancel, onAIAction }) => {
 
       {/* Help Text */}
       <div className="p-4 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg">
-        <p className="text-sm text-yellow-800 dark:text-yellow-200">
-          <strong>💡 Tip:</strong> Each topic is saved independently. Use the rich text editor for formatted explanations and the code editor for syntax-highlighted code examples. Use AI tools to quickly generate content. Add sources for proper citation in PDF exports.
-        </p>
+        <div className="prose prose-sm dark:prose-invert">
+          <p className="text-sm text-yellow-800 dark:text-yellow-200">
+            <strong>💡 Tip:</strong> Each topic is saved independently. Use the rich text editor for formatted explanations and the code editor for syntax-highlighted code examples. Use AI tools to quickly generate content. Add sources for proper citation in PDF exports.
+          </p>
+          <p className="text-sm text-yellow-800 dark:text-yellow-200 mt-2">
+            <strong>🚀 Run Code:</strong> Click the "Run Code" button to execute your code snippets in a safe sandbox environment. View real-time output and debug your code directly in the editor.
+          </p>
+        </div>
       </div>
     </div>
   );

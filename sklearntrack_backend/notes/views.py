@@ -1,5 +1,8 @@
-# FILE: notes/views.py - FINAL FIX
+# FILE: notes/views.py - COMPLETE FIXED VERSION
 # ============================================================================
+
+import logging
+from sqlite3 import IntegrityError
 
 from rest_framework import viewsets, permissions, status
 from rest_framework.decorators import action
@@ -11,7 +14,15 @@ from django.core.files.storage import default_storage
 from django.core.files.base import ContentFile
 from django.utils import timezone
 from uuid import uuid4
+from rest_framework.decorators import api_view  # Add this import
+
 import os
+from django.conf import settings
+from .code_execution_service import CodeExecutionService
+
+# Import the unified Google Drive service
+from .google_drive_service import GoogleDriveService, GoogleAuthService, SCOPES
+from .daily_report_service import DailyNotesReportService  # FIX: Add this import
 
 from .models import (
     Note, Chapter, ChapterTopic, TopicExplanation,
@@ -19,79 +30,33 @@ from .models import (
     AIGeneratedContent, NoteShare
 )
 from .serializers import (
-    NoteListSerializer, NoteDetailSerializer, ChapterSerializer,
+    NoteListSerializer, NoteDetailSerializer, NoteCreateSerializer, ChapterSerializer,
     ChapterTopicSerializer, NoteVersionSerializer, AIGeneratedContentSerializer,
     NoteShareSerializer, AIActionSerializer, TopicCreateSerializer,
     TopicUpdateSerializer
 )
-from .utils import (
-    generate_ai_explanation, generate_ai_code,
-    improve_explanation, summarize_explanation,
-    export_note_to_pdf
+from .ai_service import (
+    generate_ai_explanation,
+    generate_ai_code,
+    improve_explanation,
+    summarize_explanation
 )
+from .pdf_service import export_note_to_pdf
+
+logger = logging.getLogger(__name__)
 
 
 class NoteViewSet(viewsets.ModelViewSet):
     """Note CRUD with chapters and topics"""
-    
+
     permission_classes = [permissions.IsAuthenticated]
-    
+
     def get_serializer_class(self):
         if self.action == 'list':
             return NoteListSerializer
+        elif self.action == 'create':
+            return NoteCreateSerializer
         return NoteDetailSerializer
-    
-    def create(self, request, *args, **kwargs):
-        """Create note with unique title validation"""
-        title = request.data.get('title', '').strip()
-        
-        if not title:
-            return Response(
-                {'error': 'Note title is required'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        
-        # Check if note with same title exists for this user
-        existing_note = Note.objects.filter(
-            user=request.user,
-            title__iexact=title
-        ).first()
-        
-        if existing_note:
-            return Response(
-                {'error': f'A note with the title "{title}" already exists. Please choose a different name.'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        
-        return super().create(request, *args, **kwargs)
-    
-    def update(self, request, *args, **kwargs):
-        """Update note with unique title validation"""
-        # Get partial parameter
-        partial = kwargs.pop('partial', False)
-        
-        title = request.data.get('title', '').strip()
-        note = self.get_object()
-        
-        if title and title != note.title:
-            # Check if another note with same title exists for this user
-            existing_note = Note.objects.filter(
-                user=request.user,
-                title__iexact=title
-            ).exclude(id=note.id).first()
-            
-            if existing_note:
-                return Response(
-                    {'error': f'A note with the title "{title}" already exists. Please choose a different name.'},
-                    status=status.HTTP_400_BAD_REQUEST
-                )
-        
-        # Get the serializer
-        serializer = self.get_serializer(note, data=request.data, partial=partial)
-        serializer.is_valid(raise_exception=True)
-        self.perform_update(serializer)
-        
-        return Response(serializer.data)
     
     def get_queryset(self):
         queryset = Note.objects.filter(user=self.request.user).prefetch_related(
@@ -110,14 +75,12 @@ class NoteViewSet(viewsets.ModelViewSet):
         if course_id:
             queryset = queryset.filter(course_id=course_id)
         
-        # Tag filter
         tags = self.request.query_params.get('tags')
         if tags:
             tag_list = tags.split(',')
             for tag in tag_list:
                 queryset = queryset.filter(tags__contains=[tag.strip()])
         
-        # Search
         search = self.request.query_params.get('search')
         if search:
             queryset = queryset.filter(
@@ -129,164 +92,323 @@ class NoteViewSet(viewsets.ModelViewSet):
         
         return queryset.order_by('-updated_at')
     
+    def create(self, request, *args, **kwargs):
+        """Create note with case-insensitive unique title validation"""
+        title = request.data.get('title', '').strip()
+        
+        if not title:
+            return Response(
+                {'error': 'Note title is required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Check if note with same title exists (case-insensitive)
+        if Note.objects.check_exists('title', title, user=request.user):
+            return Response(
+                {'error': f'A note titled "{title}" already exists (case-insensitive). Please choose a different name.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        try:
+            serializer = self.get_serializer(data=request.data)
+            serializer.is_valid(raise_exception=True)
+            
+            # Add user to validated data
+            validated_data = serializer.validated_data
+            validated_data['user'] = request.user
+            
+            # Create the note
+            note = Note.objects.create(**validated_data)
+            
+            # Return response with the created note
+            response_serializer = NoteDetailSerializer(note, context={'request': request})
+            headers = self.get_success_headers(response_serializer.data)
+            return Response(response_serializer.data, status=status.HTTP_201_CREATED, headers=headers)
+            
+        except Exception as e:
+            import traceback
+            logger.error(f"Note creation error: {traceback.format_exc()}")
+            return Response(
+                {'error': f'Failed to create note: {str(e)}'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+    def update(self, request, *args, **kwargs):
+        """Update note with proper error handling"""
+        partial = kwargs.pop('partial', False)
+        instance = self.get_object()
+
+        serializer = self.get_serializer(instance, data=request.data, partial=partial)
+        serializer.is_valid(raise_exception=True)
+
+        try:
+            self.perform_update(serializer)
+            return Response(serializer.data)
+        except IntegrityError as e:
+            error_str = str(e).lower()
+            if 'unique_user_note_title' in error_str or 'duplicate' in error_str:
+                return Response(
+                    {'error': f'You already have a note titled "{request.data.get("title", "")}". Please choose a different name.'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            return Response(
+                {'error': 'Failed to update note: Database constraint violation'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
     @action(detail=True, methods=['get'])
     def structure(self, request, pk=None):
-        """Get full note structure with all nested data"""
+        """Get full note structure"""
         note = self.get_object()
-        serializer = NoteDetailSerializer(note)
+        serializer = NoteDetailSerializer(note, context={'request': request})
         return Response(serializer.data)
     
-    @action(detail=False, methods=['post'])
-    def upload_image(self, request):
-        """Upload image for use in note explanations"""
-        if 'image' not in request.FILES:
-            return Response(
-                {'error': 'No image file provided'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        
-        image_file = request.FILES['image']
-        
-        # Validate file type
-        allowed_types = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp']
-        if image_file.content_type not in allowed_types:
-            return Response(
-                {'error': 'Invalid file type. Only images (JPEG, PNG, GIF, WebP) are allowed.'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        
-        # Validate file size (max 5MB)
-        if image_file.size > 5 * 1024 * 1024:
-            return Response(
-                {'error': 'File size too large. Maximum size is 5MB.'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        
-        # Generate unique filename
-        file_ext = os.path.splitext(image_file.name)[1]
-        filename = f"notes/images/{uuid4()}{file_ext}"
-        
-        # Save file
-        saved_path = default_storage.save(filename, ContentFile(image_file.read()))
-        
-        # Return URL
-        file_url = request.build_absolute_uri(default_storage.url(saved_path))
-        
-        return Response({
-            'url': file_url,
-            'filename': saved_path
-        }, status=status.HTTP_201_CREATED)
-    
+    # In views.py, update the export_pdf action:
     @action(detail=True, methods=['post'])
     def export_pdf(self, request, pk=None):
-        """Export note to PDF with proper formatting"""
+        """Export note to PDF"""
         note = self.get_object()
         
         try:
             pdf_file = export_note_to_pdf(note)
             
-            if not pdf_file:
-                return Response(
-                    {'error': 'Failed to generate PDF'},
-                    status=status.HTTP_500_INTERNAL_SERVER_ERROR
-                )
-            
-            # Create HTTP response with PDF content
             response = HttpResponse(pdf_file.read(), content_type='application/pdf')
-            filename = f"note_{note.slug}_{timezone.now().strftime('%Y%m%d')}.pdf"
+            filename = f"note_{note.slug}_{timezone.now().strftime('%Y%m%d_%H%M%S')}.pdf"
             response['Content-Disposition'] = f'attachment; filename="{filename}"'
+            response['Content-Length'] = pdf_file.size
+            
+            # Log success
+            logger.info(f"PDF exported successfully for note {note.id}, size: {pdf_file.size} bytes")
             
             return response
         except Exception as e:
             import traceback
             error_details = traceback.format_exc()
+            logger.error(f"PDF Export Error for note {note.id}: {error_details}")
             return Response(
-                {'error': f'Failed to export PDF: {str(e)}', 'details': error_details},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+                {
+                    'error': f'Failed to export PDF: {str(e)}',
+                    'details': 'Please check the server logs for more information'
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                content_type='application/json'
             )
     
-    @action(detail=True, methods=['get'])
-    def versions(self, request, pk=None):
-        """Get note version history"""
-        note = self.get_object()
-        versions = note.versions.all()
-        serializer = NoteVersionSerializer(versions, many=True)
-        return Response(serializer.data)
+    @action(detail=False, methods=['get'])
+    def drive_status(self, request):
+        """Check Google Drive connection status"""
+        try:
+            drive_service = GoogleDriveService(request.user)
+            is_connected = drive_service.is_connected()
+            
+            return Response({
+                'connected': is_connected,
+                'can_export': is_connected
+            })
+        except Exception as e:
+            logger.error(f"Drive status check error: {e}")
+            return Response({
+                'connected': False,
+                'can_export': False,
+                'error': str(e)
+            })
     
     @action(detail=True, methods=['post'])
-    def restore_version(self, request, pk=None):
-        """Restore a specific version"""
+    def export_to_drive(self, request, pk=None):
+        """Export note to Google Drive (manual upload)"""
         note = self.get_object()
-        version_id = request.data.get('version_id')
         
         try:
-            version = NoteVersion.objects.get(id=version_id, note=note)
+            # Initialize Drive service
+            drive_service = GoogleDriveService(request.user)
             
-            # Create new version before restoring
-            self._create_version_snapshot(note)
+            # Generate PDF
+            pdf_file = export_note_to_pdf(note)
             
-            # Restore from snapshot
-            self._restore_from_snapshot(note, version.snapshot)
-            
-            serializer = self.get_serializer(note)
-            return Response(serializer.data)
-        except NoteVersion.DoesNotExist:
-            return Response(
-                {'error': 'Version not found'},
-                status=status.HTTP_404_NOT_FOUND
+            # Upload or update
+            filename = f"{note.title}_{timezone.now().date()}.pdf"
+            result = drive_service.upload_or_update_pdf(
+                pdf_file,
+                filename,
+                existing_file_id=note.drive_file_id
             )
+            
+            if result['success']:
+                # Update note metadata
+                note.drive_file_id = result['id']
+                note.last_drive_sync_at = timezone.now()
+                note.upload_type = 'manual'
+                note.save()
+                
+                return Response({
+                    'success': True,
+                    'message': 'Updated in Google Drive' if result.get('updated') else 'Uploaded to Google Drive',
+                    'drive_link': result.get('webViewLink'),
+                    'file_id': result.get('id'),
+                    'updated': result.get('updated', False)
+                })
+            else:
+                return Response({
+                    'success': False,
+                    'error': result.get('error')
+                }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+                
+        except Exception as e:
+            error_msg = str(e)
+            if 'authentication required' in error_msg.lower():
+                return Response({
+                    'success': False,
+                    'error': 'Google Drive authentication required',
+                    'needs_auth': True
+                }, status=status.HTTP_401_UNAUTHORIZED)
+            
+            import traceback
+            logger.error(f"Drive Export Error: {traceback.format_exc()}")
+            return Response({
+                'success': False,
+                'error': error_msg
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
     
-    def _create_version_snapshot(self, note):
-        """Create a version snapshot of current note state"""
-        version_number = note.versions.count() + 1
-        
-        snapshot = {
-            'title': note.title,
-            'tags': note.tags,
-            'status': note.status,
-            'chapters': []
-        }
-        
-        for chapter in note.chapters.all():
-            chapter_data = {
-                'title': chapter.title,
-                'order': chapter.order,
-                'topics': []
-            }
+    @action(detail=False, methods=['get'])
+    def google_auth_url(self, request):
+        """Get Google OAuth URL"""
+        try:
+            from google_auth_oauthlib.flow import Flow
+            import secrets
             
-            for topic in chapter.topics.all():
-                topic_data = {
-                    'name': topic.name,
-                    'order': topic.order,
-                    'explanation': topic.explanation.content if topic.explanation else None,
-                    'code_snippet': {
-                        'language': topic.code_snippet.language,
-                        'code': topic.code_snippet.code
-                    } if topic.code_snippet else None,
-                    'source': {
-                        'title': topic.source.title,
-                        'url': topic.source.url
-                    } if topic.source else None
+            client_secret_path = os.path.join(
+                settings.BASE_DIR.parent,
+                'client_secret.json'
+            )
+            
+            if not os.path.exists(client_secret_path):
+                return Response({
+                    'success': False,
+                    'error': 'Google Drive not configured. Please add client_secret.json'
+                }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            
+            # Generate secure state token with user_id embedded - FIX: Use colon separator
+            random_token = secrets.token_urlsafe(32)
+            state = f"{request.user.id}:{random_token}"  # CHANGE: Use colon, not underscore
+            
+            # Store in session with explicit saving
+            request.session['google_auth_state'] = state
+            request.session['google_auth_user_id'] = request.user.id
+            request.session['user_id'] = request.user.id
+            
+            # Force session to save
+            request.session.save()
+            
+            logger.info(f"Generated state for user {request.user.id}: {state}")
+            logger.info(f"Session saved with ID: {request.session.session_key}")
+            
+            # Create redirect URI
+            redirect_uri = 'http://localhost:8000/api/notes/google-callback/'
+            
+            flow = Flow.from_client_secrets_file(
+                client_secret_path,
+                scopes=SCOPES,
+                redirect_uri=redirect_uri
+            )
+            
+            authorization_url, _ = flow.authorization_url(
+                access_type='offline',
+                include_granted_scopes='true',
+                state=state,
+                prompt='consent'
+            )
+            
+            logger.info(f"Generated auth URL for user {request.user.id}")
+            
+            return Response({
+                'success': True,
+                'auth_url': authorization_url,
+                'state': state,
+                'user_id': request.user.id,
+                'session_key': request.session.session_key
+            })
+            
+        except Exception as e:
+            logger.error(f"Auth URL generation error: {str(e)}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return Response({
+                'success': False,
+                'error': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        
+    @action(detail=False, methods=['get'])
+    def daily_report(self, request):
+        """
+        USER-based daily report (works even if no notes exist)
+        """
+        try:
+            report_data = DailyNotesReportService.generate_daily_report(request.user)
+
+            return Response({
+                'success': True,
+                'report': {
+                    'date': report_data['date'],
+                    'notes_created': report_data['notes_created'],
+                    'notes_updated': report_data['notes_updated'],
+                    'topics_created': report_data['topics_created'],
+                    'study_time_estimate': report_data['study_time_estimate'],
+                    'notes_list': [
+                        {
+                            'id': note.id,
+                            'title': note.title,
+                            'status': note.status,
+                            'chapters_count': note.chapters.count()
+                        }
+                        for note in report_data['notes_list']
+                    ]
                 }
-                chapter_data['topics'].append(topic_data)
-            
-            snapshot['chapters'].append(chapter_data)
-        
-        NoteVersion.objects.create(
-            note=note,
-            version_number=version_number,
-            snapshot=snapshot,
-            changes_summary=f"Auto-save at {note.updated_at}"
-        )
+            })
+        except Exception as e:
+            return Response(
+                {'success': False, 'error': str(e)},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+
+    @action(detail=False, methods=['post'])
+    def send_daily_report_email(self, request):
+        """
+        Send daily report email (no note ID required)
+        """
+        try:
+            report_data = DailyNotesReportService.generate_daily_report(request.user)
+            success = DailyNotesReportService.send_daily_report_email(
+                request.user,
+                report_data
+            )
+
+            if success:
+                return Response({
+                    'success': True,
+                    'message': 'Daily report sent to your email'
+                })
+
+            return Response(
+                {'success': False, 'error': 'Failed to send email'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+        except Exception as e:
+            return Response(
+                {'success': False, 'error': str(e)},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
     
     def destroy(self, request, *args, **kwargs):
-        """Delete note with proper cascade deletion - FIXED for roadmap_tasks issue"""
+        """Delete note with proper cleanup"""
         note = self.get_object()
         note_title = note.title
         
         try:
             with transaction.atomic():
-                # Check if roadmap_tasks table exists
+                # Clear roadmap_tasks reference if table exists
                 with connection.cursor() as cursor:
                     cursor.execute("""
                         SELECT EXISTS (
@@ -294,117 +416,26 @@ class NoteViewSet(viewsets.ModelViewSet):
                             WHERE table_name = 'roadmap_tasks'
                         );
                     """)
-                    roadmap_tasks_exists = cursor.fetchone()[0]
-                
-                # If roadmap_tasks exists, clear the foreign key reference
-                if roadmap_tasks_exists:
-                    with connection.cursor() as cursor:
+                    if cursor.fetchone()[0]:
                         cursor.execute(
                             "UPDATE roadmap_tasks SET note_id = NULL WHERE note_id = %s;",
                             [note.id]
                         )
                 
-                # Get all topic IDs for AI content deletion
-                topic_ids = list(ChapterTopic.objects.filter(
-                    chapter__note=note
-                ).values_list('id', flat=True))
-                
-                # Delete all chapters and their topics
-                for chapter in note.chapters.all():
-                    for topic in chapter.topics.all():
-                        # Delete related objects
-                        if topic.explanation:
-                            topic.explanation.delete()
-                        if topic.code_snippet:
-                            topic.code_snippet.delete()
-                        if topic.source:
-                            topic.source.delete()
-                        topic.delete()
-                    chapter.delete()
-                
-                # Delete AI generated content
-                AIGeneratedContent.objects.filter(topic_id__in=topic_ids).delete()
-                
-                # Delete note versions
-                note.versions.all().delete()
-                
-                # Delete note shares
-                note.shares.all().delete()
-                
-                # Delete the note
+                # Delete note (cascade will handle related objects)
                 note.delete()
             
-            return Response(
-                {
-                    'message': f'Note "{note_title}" has been successfully deleted.',
-                    'success': True
-                },
-                status=status.HTTP_200_OK
-            )
+            return Response({
+                'message': f'Note "{note_title}" deleted successfully',
+                'success': True
+            })
         except Exception as e:
             import traceback
-            error_details = traceback.format_exc()
-            print(f"Error deleting note: {error_details}")
-            return Response(
-                {
-                    'error': f'Failed to delete note: {str(e)}',
-                    'details': error_details,
-                    'success': False
-                },
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
-            )
-    
-    def _restore_from_snapshot(self, note, snapshot):
-        """Restore note from snapshot"""
-        with transaction.atomic():
-            # Update note fields
-            note.title = snapshot.get('title', note.title)
-            note.tags = snapshot.get('tags', note.tags)
-            note.status = snapshot.get('status', note.status)
-            note.save()
-            
-            # Delete existing chapters
-            note.chapters.all().delete()
-            
-            # Recreate chapters and topics
-            for chapter_data in snapshot.get('chapters', []):
-                chapter = Chapter.objects.create(
-                    note=note,
-                    title=chapter_data['title'],
-                    order=chapter_data['order']
-                )
-                
-                for topic_data in chapter_data.get('topics', []):
-                    topic = ChapterTopic.objects.create(
-                        chapter=chapter,
-                        name=topic_data['name'],
-                        order=topic_data['order']
-                    )
-                    
-                    # Create explanation
-                    if topic_data.get('explanation'):
-                        explanation = TopicExplanation.objects.create(
-                            content=topic_data['explanation']
-                        )
-                        topic.explanation = explanation
-                    
-                    # Create code snippet
-                    if topic_data.get('code_snippet'):
-                        code = TopicCodeSnippet.objects.create(
-                            language=topic_data['code_snippet']['language'],
-                            code=topic_data['code_snippet']['code']
-                        )
-                        topic.code_snippet = code
-                    
-                    # Create source
-                    if topic_data.get('source'):
-                        source = TopicSource.objects.create(
-                            title=topic_data['source']['title'],
-                            url=topic_data['source']['url']
-                        )
-                        topic.source = source
-                    
-                    topic.save()
+            print(f"Delete Error: {traceback.format_exc()}")
+            return Response({
+                'error': f'Failed to delete note: {str(e)}',
+                'success': False
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 class ChapterViewSet(viewsets.ModelViewSet):
@@ -442,6 +473,13 @@ class ChapterViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST
             )
         
+        # Check if chapter with same title exists (case-insensitive)
+        if Chapter.objects.check_exists('title', title, note=note):
+            return Response(
+                {'error': f'A chapter titled "{title}" already exists in this note (case-insensitive). Please use a different name.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
         # Get next order number
         max_order_result = Chapter.objects.filter(note=note).aggregate(
             max_order=Max('order')
@@ -455,7 +493,14 @@ class ChapterViewSet(viewsets.ModelViewSet):
                 title=title,
                 order=next_order
             )
+        except IntegrityError:
+            return Response(
+                {'error': f'A chapter titled "{title}" already exists in this note. Please use a different name.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
         except Exception as e:
+            import traceback
+            print(f"Chapter Creation Error: {traceback.format_exc()}")
             return Response(
                 {'error': f'Failed to create chapter: {str(e)}'},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
@@ -537,7 +582,7 @@ class TopicViewSet(viewsets.ModelViewSet):
         ).select_related('explanation', 'code_snippet', 'source').order_by('order')
     
     def create(self, request):
-        """Create topic with optional components"""
+        """Create topic with case-insensitive validation"""
         serializer = TopicCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         
@@ -552,49 +597,65 @@ class TopicViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_404_NOT_FOUND
             )
         
-        with transaction.atomic():
-            # Calculate next order number
-            max_order_result = ChapterTopic.objects.filter(chapter=chapter).aggregate(
-                max_order=Max('order')
+        topic_name = data['name'].strip()
+        
+        # Check if topic with same name exists (case-insensitive)
+        if ChapterTopic.objects.check_exists('name', topic_name, chapter=chapter):
+            return Response(
+                {'error': f'Topic "{topic_name}" already exists in this chapter (case-insensitive). Please use a different name.'},
+                status=status.HTTP_400_BAD_REQUEST
             )
-            max_order = max_order_result['max_order']
-            next_order = (max_order + 1) if max_order is not None else 0
-            
-            # Create topic
-            topic = ChapterTopic.objects.create(
-                chapter=chapter,
-                name=data['name'],
-                order=next_order
+        
+        # Calculate next order number
+        max_order_result = ChapterTopic.objects.filter(chapter=chapter).aggregate(
+            max_order=Max('order')
+        )
+        max_order = max_order_result['max_order']
+        next_order = (max_order + 1) if max_order is not None else 0
+
+        try:
+            with transaction.atomic():
+                # Create topic
+                topic = ChapterTopic.objects.create(
+                    chapter=chapter,
+                    name=topic_name,
+                    order=next_order
+                )
+
+                # Create explanation if provided
+                if data.get('explanation_content'):
+                    explanation = TopicExplanation.objects.create(
+                        content=data['explanation_content']
+                    )
+                    topic.explanation = explanation
+
+                # Create code snippet if provided
+                if data.get('code_content'):
+                    code = TopicCodeSnippet.objects.create(
+                        language=data.get('code_language', 'python'),
+                        code=data['code_content']
+                    )
+                    topic.code_snippet = code
+
+                # Create source if provided
+                if data.get('source_url'):
+                    source = TopicSource.objects.create(
+                        title=data.get('source_title', 'Reference'),
+                        url=data['source_url']
+                    )
+                    topic.source = source
+
+                topic.save()
+
+        except IntegrityError:
+            return Response(
+                {'error': f'Topic "{topic_name}" already exists in this chapter. Please use a different name.'},
+                status=status.HTTP_400_BAD_REQUEST
             )
-            
-            # Create explanation if provided
-            if data.get('explanation_content'):
-                explanation = TopicExplanation.objects.create(
-                    content=data['explanation_content']
-                )
-                topic.explanation = explanation
-            
-            # Create code snippet if provided
-            if data.get('code_content'):
-                code = TopicCodeSnippet.objects.create(
-                    language=data.get('code_language', 'python'),
-                    code=data['code_content']
-                )
-                topic.code_snippet = code
-            
-            # Create source if provided
-            if data.get('source_url'):
-                source = TopicSource.objects.create(
-                    title=data.get('source_title', 'Reference'),
-                    url=data['source_url']
-                )
-                topic.source = source
-            
-            topic.save()
         
         response_serializer = ChapterTopicSerializer(topic)
         return Response(response_serializer.data, status=status.HTTP_201_CREATED)
-    
+
     def update(self, request, *args, **kwargs):
         """Update topic and its components - FIXED partial parameter"""
         # Handle partial parameter correctly
@@ -767,3 +828,23 @@ class NoteShareViewSet(viewsets.ModelViewSet):
         return NoteShare.objects.filter(
             Q(shared_by=self.request.user) | Q(shared_with=self.request.user)
         )
+
+# Add this view function
+@api_view(['POST'])
+def execute_code(request):
+    """Execute code and return results"""
+    code = request.data.get('code', '')
+    language = request.data.get('language', 'python')
+    
+    if not code:
+        return Response({'error': 'No code provided'}, status=400)
+    
+    try:
+        result = CodeExecutionService.execute_code(code, language)
+        return Response(result)
+    except Exception as e:
+        return Response({
+            'success': False,
+            'output': f"Execution failed: {str(e)}",
+            'error': True
+        }, status=500)

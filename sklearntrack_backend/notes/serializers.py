@@ -7,6 +7,9 @@ from .models import (
     TopicCodeSnippet, TopicSource, NoteVersion, 
     AIGeneratedContent, NoteShare
 )
+import os
+from django.conf import settings
+
 
 
 class TopicExplanationSerializer(serializers.ModelSerializer):
@@ -142,16 +145,30 @@ class NoteListSerializer(serializers.ModelSerializer):
         return ChapterTopic.objects.filter(chapter__note=obj).count()
 
 
+# Add to your NoteDetailSerializer:
+
+class NoteCreateSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Note
+        fields = ['title', 'status', 'tags', 'course', 'course_topic', 'course_subtopic', 'session_date']
+    
+    def create(self, validated_data):
+        # Get the user from context (set by the view)
+        user = self.context['request'].user
+        return Note.objects.create(user=user, **validated_data)
+    
 class NoteDetailSerializer(serializers.ModelSerializer):
     chapters = ChapterSerializer(many=True, read_only=True)
     version_count = serializers.SerializerMethodField()
-    
+    google_drive_status = serializers.SerializerMethodField()  # NEW
+
     class Meta:
         model = Note
         fields = [
             'id', 'title', 'slug', 'tags', 'status',
             'course', 'course_topic', 'course_subtopic',
             'chapters', 'version_count', 'session_date',
+            'google_drive_status',  # NEW
             'created_at', 'updated_at'
         ]
         read_only_fields = ['slug', 'created_at', 'updated_at']
@@ -159,9 +176,19 @@ class NoteDetailSerializer(serializers.ModelSerializer):
     def get_version_count(self, obj):
         return obj.versions.count()
     
-    def create(self, validated_data):
-        validated_data['user'] = self.context['request'].user
-        return super().create(validated_data)
+    def get_google_drive_status(self, obj):
+        """Check if user has Google Drive connected"""
+        user = self.context['request'].user
+        token_path = os.path.join(
+            settings.MEDIA_ROOT,
+            'google_tokens',
+            f'token_{user.id}.pickle'
+        )
+        return {
+            'connected': os.path.exists(token_path),
+            'can_export': os.path.exists(token_path)
+        }
+
 
 
 class NoteVersionSerializer(serializers.ModelSerializer):
