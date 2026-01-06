@@ -832,7 +832,7 @@ class NoteShareViewSet(viewsets.ModelViewSet):
 # Add this view function
 @api_view(['POST'])
 def execute_code(request):
-    """Execute code and return results"""
+    """Execute code and return results with detailed error handling"""
     code = request.data.get('code', '')
     language = request.data.get('language', 'python')
     
@@ -841,10 +841,97 @@ def execute_code(request):
     
     try:
         result = CodeExecutionService.execute_code(code, language)
+        
+        # Format error output to look like VS Code
+        if result.get('error') and not result.get('success'):
+            error_output = result.get('output', '')
+            formatted_error = format_error_output(error_output, language, code)
+            result['formatted_error'] = formatted_error
+            result['has_line_numbers'] = True
+        
         return Response(result)
     except Exception as e:
+        logger.error(f"Code execution error: {str(e)}")
         return Response({
             'success': False,
             'output': f"Execution failed: {str(e)}",
-            'error': True
+            'error': True,
+            'formatted_error': format_generic_error(str(e), code)
         }, status=500)
+
+
+def format_error_output(error_output, language, original_code):
+    """Format error output to look like VS Code with line numbers"""
+    lines = original_code.split('\n')
+    formatted_error = []
+    
+    # Add line numbers to the code
+    for i, line in enumerate(lines, 1):
+        formatted_error.append(f"{i:3d} | {line}")
+    
+    formatted_error.append("\n" + "═" * 80 + "\n")
+    formatted_error.append("🚨 ERROR OUTPUT:\n")
+    
+    # Parse and format error messages
+    if language == 'python':
+        # Format Python errors
+        error_lines = error_output.split('\n')
+        for error_line in error_lines:
+            if 'File' in error_line and 'line' in error_line:
+                # Extract line number from traceback
+                import re
+                match = re.search(r'line (\d+)', error_line)
+                if match:
+                    line_num = int(match.group(1))
+                    formatted_error.append(f"❌ Error at line {line_num}: {error_line}")
+                else:
+                    formatted_error.append(f"❌ {error_line}")
+            elif 'Error:' in error_line or 'error:' in error_line.lower():
+                formatted_error.append(f"🔥 {error_line}")
+            elif error_line.strip():
+                formatted_error.append(f"   {error_line}")
+    elif language in ['javascript', 'typescript']:
+        # Format JavaScript errors
+        error_lines = error_output.split('\n')
+        for error_line in error_lines:
+            if 'at' in error_line and ('.js:' in error_line or '.ts:' in error_line):
+                formatted_error.append(f"🔧 {error_line}")
+            elif 'Error:' in error_line or 'error:' in error_line.lower():
+                formatted_error.append(f"🔥 {error_line}")
+            elif error_line.strip():
+                formatted_error.append(f"   {error_line}")
+    elif language in ['java', 'cpp', 'c']:
+        # Format Java/C++ errors
+        error_lines = error_output.split('\n')
+        for error_line in error_lines:
+            if '.java:' in error_line or '.cpp:' in error_line or '.c:' in error_line:
+                formatted_error.append(f"🔧 {error_line}")
+            elif 'error:' in error_line.lower() or 'Error:' in error_line:
+                formatted_error.append(f"🔥 {error_line}")
+            elif error_line.strip():
+                formatted_error.append(f"   {error_line}")
+    else:
+        # Generic formatting for other languages
+        formatted_error.append(error_output)
+    
+    return '\n'.join(formatted_error)
+
+
+def format_generic_error(error_message, code):
+    """Format generic errors with code context"""
+    lines = code.split('\n')
+    formatted = []
+    
+    formatted.append("📋 YOUR CODE:")
+    for i, line in enumerate(lines, 1):
+        formatted.append(f"{i:3d} | {line}")
+    
+    formatted.append("\n" + "═" * 80 + "\n")
+    formatted.append(f"🚨 SERVER ERROR: {error_message}")
+    formatted.append("\n💡 TROUBLESHOOTING:")
+    formatted.append("• Check if the programming language is supported")
+    formatted.append("• Make sure your code syntax is correct")
+    formatted.append("• For timeouts, simplify your code")
+    formatted.append("• Check for infinite loops")
+    
+    return '\n'.join(formatted)

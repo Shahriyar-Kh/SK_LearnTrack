@@ -45,21 +45,28 @@ class CodeExecutionService:
             }
     
     @staticmethod
-    def _execute_python(code):
-        """Execute Python code"""
+    def _execute_python(code, input_data=None):
         with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
             f.write(code)
             temp_file = f.name
         
         try:
+            # Create input file if needed
+            input_args = {}
+            if input_data:
+                input_file = tempfile.NamedTemporaryFile(mode='w', delete=False)
+                input_file.write(input_data)
+                input_file.close()
+                input_args['stdin'] = open(input_file.name, 'r')
+            
             result = subprocess.run(
                 ['python', temp_file],
                 capture_output=True,
                 text=True,
-                timeout=10,  # 10 second timeout
-                cwd=tempfile.gettempdir()
+                timeout=10,
+                cwd=tempfile.gettempdir(),
+                **input_args
             )
-            
             output = result.stdout
             error = result.stderr
             
@@ -197,3 +204,124 @@ class CodeExecutionService:
             class_file = os.path.join(tempfile.gettempdir(), f"{class_name}.class")
             if os.path.exists(class_file):
                 os.unlink(class_file)
+    @staticmethod
+    def _execute_cpp(code):
+        """Execute C++ code"""
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.cpp', delete=False) as f:
+            f.write(code)
+            cpp_file = f.name
+        
+        try:
+            # Compile C++ code
+            executable = os.path.join(tempfile.gettempdir(), 'program')
+            compile_result = subprocess.run(
+                ['g++', cpp_file, '-o', executable, '-std=c++11'],
+                capture_output=True,
+                text=True,
+                cwd=tempfile.gettempdir()
+            )
+            
+            if compile_result.returncode != 0:
+                return {
+                    'success': False,
+                    'output': f"Compilation error:\n{compile_result.stderr}",
+                    'error': True
+                }
+            
+            # Execute compiled program
+            exec_result = subprocess.run(
+                [executable],
+                capture_output=True,
+                text=True,
+                timeout=10,
+                cwd=tempfile.gettempdir()
+            )
+            
+            output = exec_result.stdout
+            error = exec_result.stderr
+            
+            if exec_result.returncode != 0:
+                return {
+                    'success': False,
+                    'output': f"Execution error:\n{error}",
+                    'error': True
+                }
+            
+            return {
+                'success': True,
+                'output': output,
+                'error': False
+            }
+        except subprocess.TimeoutExpired:
+            return {
+                'success': False,
+                'output': "Execution timed out (10 seconds)",
+                'error': True
+            }
+        finally:
+            # Cleanup files
+            if os.path.exists(cpp_file):
+                os.unlink(cpp_file)
+            if os.path.exists(executable):
+                os.unlink(executable)
+    
+    @staticmethod
+    def _execute_c(code):
+        """Execute C code"""
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.c', delete=False) as f:
+            f.write(code)
+            c_file = f.name
+        
+        try:
+            # Compile C code
+            executable = os.path.join(tempfile.gettempdir(), 'program')
+            compile_result = subprocess.run(
+                ['gcc', c_file, '-o', executable],
+                capture_output=True,
+                text=True,
+                cwd=tempfile.gettempdir()
+            )
+            
+            if compile_result.returncode != 0:
+                return {
+                    'success': False,
+                    'output': f"Compilation error:\n{compile_result.stderr}",
+                    'error': True
+                }
+            
+            # Execute compiled program
+            exec_result = subprocess.run(
+                [executable],
+                capture_output=True,
+                text=True,
+                timeout=10,
+                cwd=tempfile.gettempdir()
+            )
+            
+            output = exec_result.stdout
+            error = exec_result.stderr
+            
+            if exec_result.returncode != 0:
+                return {
+                    'success': False,
+                    'output': f"Execution error:\n{error}",
+                    'error': True
+                }
+            
+            return {
+                'success': True,
+                'output': output,
+                'error': False
+            }
+        except subprocess.TimeoutExpired:
+            return {
+                'success': False,
+                'output': "Execution timed out (10 seconds)",
+                'error': True
+            }
+        finally:
+            # Cleanup files
+            if os.path.exists(c_file):
+                os.unlink(c_file)
+            if os.path.exists(executable):
+                os.unlink(executable)

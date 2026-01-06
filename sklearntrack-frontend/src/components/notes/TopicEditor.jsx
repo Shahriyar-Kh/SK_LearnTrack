@@ -16,7 +16,7 @@ const TopicEditor = ({ topic, onSave, onCancel, onAIAction }) => {
   const [error, setError] = useState(null);
   const [runningCode, setRunningCode] = useState(false);
   const [codeOutput, setCodeOutput] = useState('');
-  const [codeError, setCodeError] = useState('');
+  const [codeError, setCodeError] = useState(null);
   
   const [formData, setFormData] = useState({
     name: topic?.name || '',
@@ -140,31 +140,80 @@ const TopicEditor = ({ topic, onSave, onCancel, onAIAction }) => {
 
   const handleRunCode = async () => {
     if (!formData.code.content.trim()) {
-      setCodeError('No code to run');
+      setCodeError({
+        message: 'No code to run',
+        formatted: '🚨 ERROR: No code to run\n\nPlease write some code first.'
+      });
       return;
     }
 
     setRunningCode(true);
     setCodeOutput('');
-    setCodeError('');
+    setCodeError(null);
 
     try {
+      console.log('Running code:', formData.code.language, 'length:', formData.code.content.length);
       const result = await noteService.runCode({
         code: formData.code.content,
         language: formData.code.language
       });
       
+      console.log('Run code result:', result);
+      
       if (result.success) {
-        setCodeOutput(result.output || 'Code executed successfully (no output)');
-        if (result.error) {
-          setCodeError(result.error);
+        setCodeOutput(result.output || '✅ Code executed successfully (no output)');
+        
+        // If there's an error but success is true (compilation warnings, etc.)
+        if (result.error && result.output) {
+          setCodeError({
+            message: 'Execution completed with issues',
+            formatted: result.formatted_error || result.output
+          });
         }
       } else {
-        setCodeError(result.error || 'Failed to execute code');
+        // Format error output with line numbers if available
+        if (result.formatted_error) {
+          setCodeError({
+            message: result.output || 'Code execution failed',
+            formatted: result.formatted_error
+          });
+        } else {
+          // Create formatted error with line numbers
+          const lines = formData.code.content.split('\n');
+          let formattedError = "📋 YOUR CODE:\n";
+          lines.forEach((line, index) => {
+            formattedError += `${(index + 1).toString().padStart(3)} | ${line}\n`;
+          });
+          formattedError += `\n═${'═'.repeat(78)}═\n`;
+          formattedError += `🚨 ERROR: ${result.output || 'Unknown error'}`;
+          
+          setCodeError({
+            message: result.output || 'Code execution failed',
+            formatted: formattedError
+          });
+        }
       }
     } catch (error) {
       console.error('Code execution error:', error);
-      setCodeError(error.message || 'An error occurred while executing the code');
+      
+      // Create formatted error message
+      const lines = formData.code.content.split('\n');
+      let formattedError = "📋 YOUR CODE:\n";
+      lines.forEach((line, index) => {
+        formattedError += `${(index + 1).toString().padStart(3)} | ${line}\n`;
+      });
+      formattedError += `\n═${'═'.repeat(78)}═\n`;
+      formattedError += `🚨 EXECUTION FAILED: ${error.message}\n\n`;
+      formattedError += "💡 TROUBLESHOOTING:\n";
+      formattedError += "• Check if the language is supported\n";
+      formattedError += "• Verify your code syntax\n";
+      formattedError += "• Look for infinite loops\n";
+      formattedError += "• Reduce code complexity if timeout\n";
+      
+      setCodeError({
+        message: error.message,
+        formatted: formattedError
+      });
     } finally {
       setRunningCode(false);
     }
@@ -203,28 +252,81 @@ const TopicEditor = ({ topic, onSave, onCancel, onAIAction }) => {
       setAiLoading(null);
     }
   };
-  //  helper funtion for markdown conversion
-  const convertToHtml = (markdown) => {
-  if (!markdown) return '';
-  
-  // Convert markdown to basic HTML
-  let html = markdown
-    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-    .replace(/\*(.*?)\*/g, '<em>$1</em>')
-    .replace(/`(.*?)`/g, '<code>$1</code>')
-    .replace(/^\s*#\s+(.*)$/gm, '<h1>$1</h1>')
-    .replace(/^\s*##\s+(.*)$/gm, '<h2>$1</h2>')
-    .replace(/^\s*###\s+(.*)$/gm, '<h3>$1</h3>')
-    .replace(/^\s*-\s+(.*)$/gm, '<li>$1</li>')
-    .replace(/^\s*\*\s+(.*)$/gm, '<li>$1</li>')
-    .replace(/\n/g, '<br/>');
-  
-  return html;
-};
 
   const clearCodeOutput = () => {
     setCodeOutput('');
-    setCodeError('');
+    setCodeError(null);
+  };
+
+  const renderCodeOutput = () => {
+    if (!codeOutput && !codeError) return null;
+    
+    if (codeError) {
+      return (
+        <div className="mt-4 border border-red-300 dark:border-red-700 rounded-lg overflow-hidden">
+          <div className="flex items-center justify-between bg-red-800 px-4 py-2">
+            <div className="flex items-center gap-2">
+              <Terminal size={16} className="text-red-200" />
+              <span className="text-white text-sm font-medium">Execution Error</span>
+            </div>
+            <button
+              onClick={() => setCodeError(null)}
+              className="text-red-200 hover:text-white"
+            >
+              <X size={14} />
+            </button>
+          </div>
+          <div className="bg-red-50 dark:bg-red-900/30 p-4">
+            <div className="font-mono text-sm whitespace-pre-wrap overflow-x-auto">
+              {typeof codeError === 'object' ? (
+                <div className="space-y-2">
+                  <div className="text-red-700 dark:text-red-300 font-semibold">
+                    {codeError.message}
+                  </div>
+                  {codeError.formatted && (
+                    <div className="border-l-4 border-red-500 pl-3">
+                      <pre className="text-red-800 dark:text-red-200 text-xs leading-relaxed">
+                        {codeError.formatted}
+                      </pre>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="text-red-700 dark:text-red-300">
+                  <pre className="whitespace-pre-wrap">{codeError}</pre>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      );
+    }
+    
+    return (
+      <div className="mt-4 border dark:border-gray-600 rounded-lg overflow-hidden">
+        <div className="flex items-center justify-between bg-gray-800 px-4 py-2">
+          <div className="flex items-center gap-2">
+            <Terminal size={16} className="text-green-400" />
+            <span className="text-white text-sm font-medium">Output</span>
+          </div>
+          <button
+            onClick={clearCodeOutput}
+            className="text-gray-400 hover:text-white"
+          >
+            <X size={14} />
+          </button>
+        </div>
+        <div className="bg-gray-900 text-white p-4 font-mono text-sm">
+          <div className="text-green-400">
+            <div className="flex items-center gap-2 mb-1">
+              <Terminal size={12} />
+              <span className="font-medium">Output:</span>
+            </div>
+            <pre className="whitespace-pre-wrap">{codeOutput}</pre>
+          </div>
+        </div>
+      </div>
+    );
   };
 
   return (
@@ -413,42 +515,8 @@ const TopicEditor = ({ topic, onSave, onCancel, onAIAction }) => {
           />
         </div>
 
-        {/* Code Output Section */}
-        {(codeOutput || codeError) && (
-          <div className="mt-4 border dark:border-gray-600 rounded-lg overflow-hidden">
-            <div className="flex items-center justify-between bg-gray-800 px-4 py-2">
-              <div className="flex items-center gap-2">
-                <Terminal size={16} className="text-green-400" />
-                <span className="text-white text-sm font-medium">Output</span>
-              </div>
-              <button
-                onClick={clearCodeOutput}
-                className="text-gray-400 hover:text-white"
-              >
-                <X size={14} />
-              </button>
-            </div>
-            <div className="bg-gray-900 text-white p-4 font-mono text-sm">
-              {codeError ? (
-                <div className="text-red-400">
-                  <div className="flex items-center gap-2 mb-1">
-                    <Terminal size={12} />
-                    <span className="font-medium">Error:</span>
-                  </div>
-                  <pre className="whitespace-pre-wrap">{codeError}</pre>
-                </div>
-              ) : (
-                <div className="text-green-400">
-                  <div className="flex items-center gap-2 mb-1">
-                    <Terminal size={12} />
-                    <span className="font-medium">Output:</span>
-                  </div>
-                  <pre className="whitespace-pre-wrap">{codeOutput}</pre>
-                </div>
-              )}
-            </div>
-          </div>
-        )}
+        {/* Render Code Output or Error */}
+        {renderCodeOutput()}
 
         {/* Running Code Loading State */}
         {runningCode && !codeOutput && !codeError && (

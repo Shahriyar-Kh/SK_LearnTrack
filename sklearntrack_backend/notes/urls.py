@@ -16,7 +16,8 @@ router.register(r'shares', NoteShareViewSet, basename='share')
 urlpatterns = [
     # Put the callback URL BEFORE the router includes
     path('notes/google-callback/', GoogleOAuthCallbackView.as_view(), name='google_callback'),
+    # Put run_code BEFORE the router includes
+    path('notes/run_code/', execute_code, name='run_code'),
     path('', include(router.urls)),
-    path('notes/execute_code/', execute_code, name='execute_code'),
-    
+
 ]
