@@ -236,54 +236,72 @@ exportNotePDF: async (id, noteTitle) => {
     const response = await api.get(API_ENDPOINTS.SNIPPETS);
     return response.data;
   },
-// Run code execution
-runCode: async (codeData) => {
+// Update the runCode function
+runCode: async ({ code, language, stdin = "", timeout = 15 }) => {
   try {
-    console.log('Running code:', codeData.language, 'code length:', codeData.code.length);
-    
-    const response = await api.post('/api/notes/run_code/', codeData, {
-      timeout: 15000, // 15 second timeout
-      headers: {
-        'Content-Type': 'application/json'
+    const response = await api.post(
+      "/api/notes/run_code/",
+      { 
+        code, 
+        language, 
+        stdin,
+        timeout
+      },
+      { 
+        timeout: (timeout + 5) * 1000, // Add buffer
+        headers: {
+          'Content-Type': 'application/json'
+        }
       }
-    });
+    );
     
-    console.log('Code execution response:', response.data);
-    return response.data;
+    const data = response.data;
+    
+    // Handle input requirement
+    if (data.requires_input) {
+      return {
+        success: false,
+        output: '',
+        error: data.error,
+        requires_input: true
+      };
+    }
+    
+    return data;
   } catch (error) {
-    console.error('Error running code:', error);
+    console.error("Code execution error:", error);
     
-    // Handle different types of errors
-    if (error.code === 'ECONNABORTED') {
-      throw new Error('Code execution timed out. Please simplify your code or reduce execution time.');
+    if (error.code === "ECONNABORTED") {
+      return {
+        success: false,
+        output: '',
+        error: "Execution timeout. The code took too long to run.",
+        timeout: true
+      };
     }
     
-    if (error.response) {
-      // The request was made and the server responded with a status code
-      // that falls out of the range of 2xx
-      const status = error.response.status;
-      const data = error.response.data;
-      
-      let errorMessage = `Server error (${status}): `;
-      
-      if (data && data.error) {
-        errorMessage += data.error;
-      } else if (data && data.detail) {
-        errorMessage += data.detail;
-      } else if (data && typeof data === 'string') {
-        errorMessage += data;
-      } else {
-        errorMessage += 'Unable to execute code';
-      }
-      
-      throw new Error(errorMessage);
-    } else if (error.request) {
-      // The request was made but no response was received
-      throw new Error('No response from server. Please check your connection.');
-    } else {
-      // Something happened in setting up the request
-      throw new Error(`Request error: ${error.message}`);
+    if (error.response?.data?.error) {
+      return {
+        success: false,
+        output: '',
+        error: error.response.data.error,
+        ...error.response.data
+      };
     }
+    
+    if (error.message === "Network Error") {
+      return {
+        success: false,
+        output: '',
+        error: "Network error. Please check your internet connection."
+      };
+    }
+    
+    return {
+      success: false,
+      output: '',
+      error: "Code execution failed. Please try again."
+    };
   }
 },
 

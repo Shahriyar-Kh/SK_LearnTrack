@@ -9,6 +9,44 @@ import Editor from '@monaco-editor/react';
 import ReactMarkdown from 'react-markdown';
 import { noteService } from '@/services/note.service';
 
+// InputModal Component - Add this at the top after imports
+const InputModal = ({ open, value, onChange, onClose, onRun }) => {
+  if (!open) return null;
+  
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+      <div className="bg-white dark:bg-gray-800 rounded-lg p-6 max-w-md w-full mx-4">
+        <h3 className="text-lg font-semibold mb-4">Provide Input</h3>
+        <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
+          This code requires input. Enter the values below (one per line):
+        </p>
+        <textarea
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder="Enter input values here..."
+          className="w-full px-3 py-2 border dark:border-gray-600 rounded-lg bg-white dark:bg-gray-900 font-mono text-sm"
+          rows={5}
+          autoFocus
+        />
+        <div className="flex justify-end gap-2 mt-4">
+          <button
+            onClick={onClose}
+            className="px-4 py-2 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={onRun}
+            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+          >
+            Run with Input
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 const TopicEditor = ({ topic, onSave, onCancel, onAIAction }) => {
   const [loading, setLoading] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -17,7 +55,10 @@ const TopicEditor = ({ topic, onSave, onCancel, onAIAction }) => {
   const [runningCode, setRunningCode] = useState(false);
   const [codeOutput, setCodeOutput] = useState('');
   const [codeError, setCodeError] = useState(null);
-  
+  const [showInputModal, setShowInputModal] = useState(false);
+  const [stdinValue, setStdinValue] = useState('');
+  const [autoDetectsInput, setAutoDetectsInput] = useState(false);
+
   const [formData, setFormData] = useState({
     name: topic?.name || '',
     explanation: topic?.explanation?.content || '',
@@ -52,18 +93,10 @@ const TopicEditor = ({ topic, onSave, onCancel, onAIAction }) => {
   const languages = [
     { value: 'python', label: 'Python' },
     { value: 'javascript', label: 'JavaScript' },
-    { value: 'typescript', label: 'TypeScript' },
     { value: 'java', label: 'Java' },
     { value: 'cpp', label: 'C++' },
     { value: 'c', label: 'C' },
-    { value: 'csharp', label: 'C#' },
     { value: 'go', label: 'Go' },
-    { value: 'rust', label: 'Rust' },
-    { value: 'sql', label: 'SQL' },
-    { value: 'html', label: 'HTML' },
-    { value: 'css', label: 'CSS' },
-    { value: 'bash', label: 'Bash' },
-    { value: 'json', label: 'JSON' },
     { value: 'other', label: 'Other' }
   ];
 
@@ -72,18 +105,11 @@ const TopicEditor = ({ topic, onSave, onCancel, onAIAction }) => {
     const mapping = {
       'cpp': 'cpp',
       'c': 'c',
-      'csharp': 'csharp',
       'python': 'python',
       'javascript': 'javascript',
-      'typescript': 'typescript',
       'java': 'java',
       'go': 'go',
-      'rust': 'rust',
-      'sql': 'sql',
-      'html': 'html',
-      'css': 'css',
-      'bash': 'shell',
-      'json': 'json'
+      'other': 'plaintext'
     };
     return mapping[lang] || 'plaintext';
   };
@@ -138,85 +164,92 @@ const TopicEditor = ({ topic, onSave, onCancel, onAIAction }) => {
     }
   };
 
-  const handleRunCode = async () => {
-    if (!formData.code.content.trim()) {
-      setCodeError({
-        message: 'No code to run',
-        formatted: '🚨 ERROR: No code to run\n\nPlease write some code first.'
-      });
-      return;
-    }
-
+  // Update the executeRun function
+  const executeRun = async ({ stdin = '' } = {}) => {
     setRunningCode(true);
     setCodeOutput('');
     setCodeError(null);
-
+    
     try {
-      console.log('Running code:', formData.code.language, 'length:', formData.code.content.length);
-      const result = await noteService.runCode({
+      const payload = {
         code: formData.code.content,
-        language: formData.code.language
-      });
+        language: formData.code.language,
+        stdin,
+        timeout: 15
+      };
       
-      console.log('Run code result:', result);
+      const result = await noteService.runCode(payload);
       
       if (result.success) {
-        setCodeOutput(result.output || '✅ Code executed successfully (no output)');
+        let outputText = result.output || '✅ No output';
         
-        // If there's an error but success is true (compilation warnings, etc.)
-        if (result.error && result.output) {
-          setCodeError({
-            message: 'Execution completed with issues',
-            formatted: result.formatted_error || result.output
-          });
+        // Add execution info
+        if (result.runtime_ms) {
+          outputText += `\n\n⏱️ Runtime: ${result.runtime_ms}ms`;
         }
+        if (result.exit_code !== undefined && result.exit_code !== null) {
+          outputText += `\n📊 Exit Code: ${result.exit_code}`;
+        }
+        
+        setCodeOutput(outputText);
       } else {
-        // Format error output with line numbers if available
-        if (result.formatted_error) {
-          setCodeError({
-            message: result.output || 'Code execution failed',
-            formatted: result.formatted_error
+        // Check if it requires input
+        if (result.requires_input) {
+          setCodeError({ 
+            message: 'This code requires input', 
+            requires_input: true,
+            hint: 'Please provide input using the stdin field.'
           });
         } else {
-          // Create formatted error with line numbers
-          const lines = formData.code.content.split('\n');
-          let formattedError = "📋 YOUR CODE:\n";
-          lines.forEach((line, index) => {
-            formattedError += `${(index + 1).toString().padStart(3)} | ${line}\n`;
-          });
-          formattedError += `\n═${'═'.repeat(78)}═\n`;
-          formattedError += `🚨 ERROR: ${result.output || 'Unknown error'}`;
-          
-          setCodeError({
-            message: result.output || 'Code execution failed',
-            formatted: formattedError
+          setCodeError({ 
+            message: result.error || 'Execution failed',
+            formatted: result.formatted_error
           });
         }
       }
-    } catch (error) {
-      console.error('Code execution error:', error);
-      
-      // Create formatted error message
-      const lines = formData.code.content.split('\n');
-      let formattedError = "📋 YOUR CODE:\n";
-      lines.forEach((line, index) => {
-        formattedError += `${(index + 1).toString().padStart(3)} | ${line}\n`;
-      });
-      formattedError += `\n═${'═'.repeat(78)}═\n`;
-      formattedError += `🚨 EXECUTION FAILED: ${error.message}\n\n`;
-      formattedError += "💡 TROUBLESHOOTING:\n";
-      formattedError += "• Check if the language is supported\n";
-      formattedError += "• Verify your code syntax\n";
-      formattedError += "• Look for infinite loops\n";
-      formattedError += "• Reduce code complexity if timeout\n";
-      
-      setCodeError({
-        message: error.message,
-        formatted: formattedError
+    } catch (e) {
+      setCodeError({ 
+        message: e.message || 'Run failed',
+        details: 'Please check your connection and try again.'
       });
     } finally {
       setRunningCode(false);
     }
+  };
+
+  // Add this function inside TopicEditor component
+  const needsInput = (code, lang) => {
+    if (!code) return false;
+    
+    const patterns = {
+      python: /\binput\s*\(/i,
+      javascript: /\bprompt\s*\(/i,
+      cpp: /\bcin\s*>>|\bstd::cin\b|\bgetline\s*\(/i,
+      c: /\bscanf\s*\(|\bgets\s*\(|\bfgets\s*\(/i,
+      java: /\bScanner\b|\bSystem\.in\b|\bBufferedReader\b/i,
+      go: /\bfmt\.Scan|\bbufio\.NewReader/i,
+    };
+    
+    const pattern = patterns[lang];
+    return pattern ? pattern.test(code) : false;
+  };
+
+  // Update the handleRunCode function
+  const handleRunCode = async () => {
+    if (!formData.code.content.trim()) {
+      setCodeError({ message: 'No code to run' });
+      return;
+    }
+
+    const detected = needsInput(formData.code.content, formData.code.language);
+    
+    if (detected && !stdinValue.trim()) {
+      // Show input modal
+      setShowInputModal(true);
+      return;
+    }
+
+    await executeRun({ stdin: stdinValue });
   };
 
   const handleAI = async (action) => {
@@ -301,7 +334,7 @@ const TopicEditor = ({ topic, onSave, onCancel, onAIAction }) => {
         </div>
       );
     }
-    
+
     return (
       <div className="mt-4 border dark:border-gray-600 rounded-lg overflow-hidden">
         <div className="flex items-center justify-between bg-gray-800 px-4 py-2">
@@ -582,6 +615,18 @@ const TopicEditor = ({ topic, onSave, onCancel, onAIAction }) => {
           </p>
         </div>
       </div>
+
+      {/* Input Modal */}
+      <InputModal
+        open={showInputModal}
+        value={stdinValue}
+        onChange={setStdinValue}
+        onClose={() => setShowInputModal(false)}
+        onRun={() => {
+          setShowInputModal(false);
+          executeRun({ stdin: stdinValue });
+        }}
+      />
     </div>
   );
 };

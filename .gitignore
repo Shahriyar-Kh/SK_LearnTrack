@@ -14,4 +14,10 @@ __pycache__/
 *$py.class
 # C extensions
 *.so
+sklearntrack_backend/media/
 
+
+*.json
+
+# client secret files
+SK_LearnTrack\client_secret.json

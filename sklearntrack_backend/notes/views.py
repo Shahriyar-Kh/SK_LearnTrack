@@ -5,7 +5,8 @@ import logging
 from sqlite3 import IntegrityError
 
 from rest_framework import viewsets, permissions, status
-from rest_framework.decorators import action
+from rest_framework.decorators import action, permission_classes
+from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from django.db import transaction, connection
 from django.db.models import Q, Count, Prefetch, Max
@@ -828,37 +829,200 @@ class NoteShareViewSet(viewsets.ModelViewSet):
         return NoteShare.objects.filter(
             Q(shared_by=self.request.user) | Q(shared_with=self.request.user)
         )
+# Add this function in views.py (before the execute_code view function)
+def extract_input_requirements(code, language):
+    """Check if code requires input"""
+    if not code:
+        return False
+    
+    patterns = {
+        'python': [r'input\s*\(', r'raw_input\s*\('],
+        'java': [r'Scanner\s*\.\s*', r'System\.in', r'BufferedReader'],
+        'c': [r'scanf\s*\(', r'gets\s*\(', r'fgets\s*\('],
+        'cpp': [r'cin\s*>>', r'getline\s*\(', r'std::cin'],
+        'javascript': [r'prompt\s*\(', r'readline\s*\(', r'console\.read'],
+        'go': [r'fmt\.Scan', r'bufio\.NewReader'],
+    }
+    
+    if language in patterns:
+        import re
+        for pattern in patterns[language]:
+            if re.search(pattern, code, re.IGNORECASE):
+                return True
+    return False
+
+# Update the execute_code view function
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def execute_code(request):
+    code = request.data.get('code', '')
+    language = request.data.get('language', 'python')
+    stdin = request.data.get('stdin', '')
+    
+    if not code:
+        return Response({'success': False, 'error': 'No code provided'}, status=400)
+    
+    # Validate code length
+    if len(code) > 10000:
+        return Response({
+            'success': False, 
+            'error': 'Code is too long. Maximum 10,000 characters allowed.'
+        }, status=400)
+    
+    try:
+        # Check if code requires input but stdin is not provided
+        requires_input = extract_input_requirements(code, language)
+        if requires_input and not stdin:
+            return Response({
+                'success': False,
+                'output': '',
+                'error': f'This {language} code requires input. Please provide input in the stdin field.',
+                'exit_code': None,
+                'runtime_ms': 0,
+                'requires_input': True
+            })
+        
+        # Execute code
+        result = CodeExecutionService.execute_code(
+            code=code,
+            language=language,
+            stdin=stdin
+        )
+        
+        # Format output for display
+        if not result.get('success'):
+            # Try to extract useful error information
+            error = result.get('error', '')
+            if not error and result.get('output'):
+                # Sometimes errors are in output
+                error = result.get('output')
+            
+            # Format the error with line numbers
+            result['formatted_error'] = format_error_output(
+                error,
+                language,
+                code
+            )
+        else:
+            # Format successful output nicely
+            output = result.get('output', '').strip()
+            if output:
+                # Add success indicator
+                result['formatted_output'] = f"✅ Execution Successful\n\n{output}"
+                if result.get('runtime_ms'):
+                    result['formatted_output'] += f"\n\n⏱️ Runtime: {result['runtime_ms']}ms"
+        
+        return Response(result)
+        
+    except Exception as e:
+        import traceback
+        logger.error(f"Code execution error: {traceback.format_exc()}")
+        return Response({
+            'success': False,
+            'output': '',
+            'error': f'Server error: {str(e)}',
+            'formatted_error': f"🚨 Server Error\n\n{str(e)}\n\nPlease try again or contact support."
+        }, status=500)
+
+# Update the format_error_output function
+def format_error_output(error_output, language, original_code):
+    """Format error output to look like VS Code with line numbers"""
+    if not error_output:
+        error_output = "No error output received"
+    
+    lines = original_code.split('\n')
+    formatted_error = []
+    
+    # Add header
+    formatted_error.append("🔍 CODE WITH LINE NUMBERS:\n")
+    formatted_error.append("=" * 80)
+    
+    # Add line numbers to the code
+    for i, line in enumerate(lines, 1):
+        line_num = f"{i:3d}"
+        formatted_error.append(f"{line_num} | {line}")
+    
+    formatted_error.append("=" * 80)
+    formatted_error.append("\n🚨 ERROR DETAILS:\n")
+    
+    # Clean and format error message
+    error_lines = error_output.split('\n')
+    
+    # Remove any empty lines at start/end
+    while error_lines and not error_lines[0].strip():
+        error_lines.pop(0)
+    while error_lines and not error_lines[-1].strip():
+        error_lines.pop(-1)
+    
+    # Format based on language
+    for error_line in error_lines:
+        error_line = error_line.strip()
+        if not error_line:
+            continue
+            
+        # Highlight specific patterns
+        if any(keyword in error_line.lower() for keyword in ['error:', 'exception:', 'traceback', 'failed', 'undefined']):
+            formatted_error.append(f"🔥 {error_line}")
+        elif any(keyword in error_line.lower() for keyword in ['warning:', 'note:', 'hint:']):
+            formatted_error.append(f"⚠️  {error_line}")
+        elif 'line' in error_line.lower() and ('file' in error_line.lower() or '.py' in error_line or '.js' in error_line):
+            formatted_error.append(f"📍 {error_line}")
+        else:
+            formatted_error.append(f"   {error_line}")
+    
+    # Add debugging tips
+    formatted_error.append("\n" + "=" * 80)
+    formatted_error.append("\n💡 DEBUGGING TIPS:")
+    
+    if language == 'python':
+        formatted_error.append("• Check for syntax errors (missing colons, parentheses, etc.)")
+        formatted_error.append("• Verify all variables are defined before use")
+        formatted_error.append("• Ensure proper indentation (Python is strict about this!)")
+        formatted_error.append("• Check for infinite loops or recursion")
+    elif language in ['javascript', 'typescript']:
+        formatted_error.append("• Check for missing semicolons or braces")
+        formatted_error.append("• Verify variable declarations (let/const/var)")
+        formatted_error.append("• Check for undefined variables or functions")
+    elif language in ['java', 'cpp', 'c']:
+        formatted_error.append("• Check for missing semicolons or braces")
+        formatted_error.append("• Verify all required imports/includes")
+        formatted_error.append("• Check for type mismatches")
+    
+    return '\n'.join(formatted_error)
 
 # Add this view function
 @api_view(['POST'])
+@permission_classes([AllowAny])   # ✅ ADD
 def execute_code(request):
-    """Execute code and return results with detailed error handling"""
     code = request.data.get('code', '')
     language = request.data.get('language', 'python')
-    
+    stdin = request.data.get('stdin', '')   # ✅ ADD THIS
+
     if not code:
-        return Response({'error': 'No code provided'}, status=400)
-    
+        return Response({'success': False, 'error': 'No code provided'}, status=400)
+
     try:
-        result = CodeExecutionService.execute_code(code, language)
-        
-        # Format error output to look like VS Code
-        if result.get('error') and not result.get('success'):
-            error_output = result.get('output', '')
-            formatted_error = format_error_output(error_output, language, code)
-            result['formatted_error'] = formatted_error
-            result['has_line_numbers'] = True
-        
+        result = CodeExecutionService.execute_code(
+            code=code,
+            language=language,
+            stdin=stdin     # ✅ PASS IT
+        )
+
+        if not result.get('success'):
+            result['formatted_error'] = format_error_output(
+                result.get('error', ''),
+                language,
+                code
+            )
+
         return Response(result)
+
     except Exception as e:
-        logger.error(f"Code execution error: {str(e)}")
         return Response({
             'success': False,
-            'output': f"Execution failed: {str(e)}",
-            'error': True,
-            'formatted_error': format_generic_error(str(e), code)
+            'output': '',
+            'error': str(e)
         }, status=500)
-
 
 def format_error_output(error_output, language, original_code):
     """Format error output to look like VS Code with line numbers"""
@@ -915,23 +1079,3 @@ def format_error_output(error_output, language, original_code):
         formatted_error.append(error_output)
     
     return '\n'.join(formatted_error)
-
-
-def format_generic_error(error_message, code):
-    """Format generic errors with code context"""
-    lines = code.split('\n')
-    formatted = []
-    
-    formatted.append("📋 YOUR CODE:")
-    for i, line in enumerate(lines, 1):
-        formatted.append(f"{i:3d} | {line}")
-    
-    formatted.append("\n" + "═" * 80 + "\n")
-    formatted.append(f"🚨 SERVER ERROR: {error_message}")
-    formatted.append("\n💡 TROUBLESHOOTING:")
-    formatted.append("• Check if the programming language is supported")
-    formatted.append("• Make sure your code syntax is correct")
-    formatted.append("• For timeouts, simplify your code")
-    formatted.append("• Check for infinite loops")
-    
-    return '\n'.join(formatted)
