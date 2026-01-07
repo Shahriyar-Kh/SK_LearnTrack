@@ -365,7 +365,7 @@ const TopicEditor = ({ topic, onSave, onCancel, onAIAction }) => {
   return (
     <div className="bg-white dark:bg-gray-800 rounded-lg border dark:border-gray-700 p-6 space-y-6 max-h-[90vh] overflow-y-auto">
       {/* Header */}
-      <div className="flex items-center justify-between sticky top-0 bg-white dark:bg-gray-800 pb-4 border-b dark:border-gray-700">
+      <div className="flex items-center justify-between pt-4 sticky top-0 z-10 bg-white dark:bg-gray-800 pb-4 border-b dark:border-gray-700">
         <h3 className="text-xl font-bold flex items-center gap-2">
           <FileText size={24} className="text-blue-600" />
           {topic?.id ? 'Edit Topic' : 'New Topic'}

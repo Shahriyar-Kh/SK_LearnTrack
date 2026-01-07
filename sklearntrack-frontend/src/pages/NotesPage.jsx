@@ -358,7 +358,7 @@ const NotesPage = () => {
         <div className="container mx-auto px-4 py-6">
           <div className="flex items-center justify-between mb-4">
             <div>
-              <h1 className="text-3xl font-bold text-gray-900 dark:text-white">📚 Study Notes</h1>
+              <h1 className="text-3xl font-bold text-gray-900 dark:text-white">📚Study Notes</h1>
               <p className="text-gray-600 dark:text-gray-400">
                 Organize your learning with structured chapters and topics
               </p>
@@ -376,7 +376,7 @@ const NotesPage = () => {
                 className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition"
               >
                 <Plus size={20} />
-                New Note
+                Create Full Note
               </button>
             </div>
           </div>

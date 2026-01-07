@@ -1,29 +1,27 @@
-# FILE: notes/views.py - COMPLETE FIXED VERSION
+# FILE: notes/views.py - REFACTORED WITH SERVICES
 # ============================================================================
 
 import logging
-from sqlite3 import IntegrityError
+from django.core.exceptions import ValidationError
 
 from rest_framework import viewsets, permissions, status
-from rest_framework.decorators import action, permission_classes
+from rest_framework.decorators import action, permission_classes, api_view
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from django.db import transaction, connection
 from django.db.models import Q, Count, Prefetch, Max
 from django.http import HttpResponse
-from django.core.files.storage import default_storage
-from django.core.files.base import ContentFile
 from django.utils import timezone
 from uuid import uuid4
-from rest_framework.decorators import api_view  # Add this import
 
 import os
 from django.conf import settings
 from .code_execution_service import CodeExecutionService
 
-# Import the unified Google Drive service
+# Import services
 from .google_drive_service import GoogleDriveService, GoogleAuthService, SCOPES
-from .daily_report_service import DailyNotesReportService  # FIX: Add this import
+from .daily_report_service import DailyNotesReportService
+from .services import NoteService, ChapterService, TopicService
 
 from .models import (
     Note, Chapter, ChapterTopic, TopicExplanation,
@@ -94,48 +92,35 @@ class NoteViewSet(viewsets.ModelViewSet):
         return queryset.order_by('-updated_at')
     
     def create(self, request, *args, **kwargs):
-        """Create note with case-insensitive unique title validation"""
-        title = request.data.get('title', '').strip()
-        
-        if not title:
-            return Response(
-                {'error': 'Note title is required'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        
-        # Check if note with same title exists (case-insensitive)
-        if Note.objects.check_exists('title', title, user=request.user):
-            return Response(
-                {'error': f'A note titled "{title}" already exists (case-insensitive). Please choose a different name.'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
+        """Create note using NoteService"""
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
         
         try:
-            serializer = self.get_serializer(data=request.data)
-            serializer.is_valid(raise_exception=True)
+            # Use NoteService to create note
+            note = NoteService.create_note(
+                user=request.user,
+                **serializer.validated_data
+            )
             
-            # Add user to validated data
-            validated_data = serializer.validated_data
-            validated_data['user'] = request.user
-            
-            # Create the note
-            note = Note.objects.create(**validated_data)
-            
-            # Return response with the created note
             response_serializer = NoteDetailSerializer(note, context={'request': request})
             headers = self.get_success_headers(response_serializer.data)
             return Response(response_serializer.data, status=status.HTTP_201_CREATED, headers=headers)
             
+        except ValidationError as e:
+            return Response(
+                {'error': str(e.message) if hasattr(e, 'message') else str(e)},
+                status=status.HTTP_400_BAD_REQUEST
+            )
         except Exception as e:
-            import traceback
-            logger.error(f"Note creation error: {traceback.format_exc()}")
+            logger.error(f"Note creation error: {str(e)}")
             return Response(
                 {'error': f'Failed to create note: {str(e)}'},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
     def update(self, request, *args, **kwargs):
-        """Update note with proper error handling"""
+        """Update note using NoteService"""
         partial = kwargs.pop('partial', False)
         instance = self.get_object()
 
@@ -143,17 +128,20 @@ class NoteViewSet(viewsets.ModelViewSet):
         serializer.is_valid(raise_exception=True)
 
         try:
-            self.perform_update(serializer)
-            return Response(serializer.data)
-        except IntegrityError as e:
-            error_str = str(e).lower()
-            if 'unique_user_note_title' in error_str or 'duplicate' in error_str:
-                return Response(
-                    {'error': f'You already have a note titled "{request.data.get("title", "")}". Please choose a different name.'},
-                    status=status.HTTP_400_BAD_REQUEST
-                )
+            # Use NoteService to update note
+            updated_note = NoteService.update_note(instance, **serializer.validated_data)
+            response_serializer = NoteDetailSerializer(updated_note, context={'request': request})
+            return Response(response_serializer.data)
+            
+        except ValidationError as e:
             return Response(
-                {'error': 'Failed to update note: Database constraint violation'},
+                {'error': str(e.message) if hasattr(e, 'message') else str(e)},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        except Exception as e:
+            logger.error(f"Note update error: {str(e)}")
+            return Response(
+                {'error': 'Failed to update note'},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
@@ -164,7 +152,6 @@ class NoteViewSet(viewsets.ModelViewSet):
         serializer = NoteDetailSerializer(note, context={'request': request})
         return Response(serializer.data)
     
-    # In views.py, update the export_pdf action:
     @action(detail=True, methods=['post'])
     def export_pdf(self, request, pk=None):
         """Export note to PDF"""
@@ -178,21 +165,14 @@ class NoteViewSet(viewsets.ModelViewSet):
             response['Content-Disposition'] = f'attachment; filename="{filename}"'
             response['Content-Length'] = pdf_file.size
             
-            # Log success
             logger.info(f"PDF exported successfully for note {note.id}, size: {pdf_file.size} bytes")
-            
             return response
+            
         except Exception as e:
-            import traceback
-            error_details = traceback.format_exc()
-            logger.error(f"PDF Export Error for note {note.id}: {error_details}")
+            logger.error(f"PDF Export Error for note {note.id}: {str(e)}")
             return Response(
-                {
-                    'error': f'Failed to export PDF: {str(e)}',
-                    'details': 'Please check the server logs for more information'
-                },
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                content_type='application/json'
+                {'error': f'Failed to export PDF: {str(e)}'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
     
     @action(detail=False, methods=['get'])
@@ -216,17 +196,13 @@ class NoteViewSet(viewsets.ModelViewSet):
     
     @action(detail=True, methods=['post'])
     def export_to_drive(self, request, pk=None):
-        """Export note to Google Drive (manual upload)"""
+        """Export note to Google Drive"""
         note = self.get_object()
         
         try:
-            # Initialize Drive service
             drive_service = GoogleDriveService(request.user)
-            
-            # Generate PDF
             pdf_file = export_note_to_pdf(note)
             
-            # Upload or update
             filename = f"{note.title}_{timezone.now().date()}.pdf"
             result = drive_service.upload_or_update_pdf(
                 pdf_file,
@@ -235,7 +211,6 @@ class NoteViewSet(viewsets.ModelViewSet):
             )
             
             if result['success']:
-                # Update note metadata
                 note.drive_file_id = result['id']
                 note.last_drive_sync_at = timezone.now()
                 note.upload_type = 'manual'
@@ -263,8 +238,7 @@ class NoteViewSet(viewsets.ModelViewSet):
                     'needs_auth': True
                 }, status=status.HTTP_401_UNAUTHORIZED)
             
-            import traceback
-            logger.error(f"Drive Export Error: {traceback.format_exc()}")
+            logger.error(f"Drive Export Error: {str(e)}")
             return Response({
                 'success': False,
                 'error': error_msg
@@ -288,22 +262,16 @@ class NoteViewSet(viewsets.ModelViewSet):
                     'error': 'Google Drive not configured. Please add client_secret.json'
                 }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
             
-            # Generate secure state token with user_id embedded - FIX: Use colon separator
             random_token = secrets.token_urlsafe(32)
-            state = f"{request.user.id}:{random_token}"  # CHANGE: Use colon, not underscore
+            state = f"{request.user.id}:{random_token}"
             
-            # Store in session with explicit saving
             request.session['google_auth_state'] = state
             request.session['google_auth_user_id'] = request.user.id
             request.session['user_id'] = request.user.id
-            
-            # Force session to save
             request.session.save()
             
             logger.info(f"Generated state for user {request.user.id}: {state}")
-            logger.info(f"Session saved with ID: {request.session.session_key}")
             
-            # Create redirect URI
             redirect_uri = 'http://localhost:8000/api/notes/google-callback/'
             
             flow = Flow.from_client_secrets_file(
@@ -319,8 +287,6 @@ class NoteViewSet(viewsets.ModelViewSet):
                 prompt='consent'
             )
             
-            logger.info(f"Generated auth URL for user {request.user.id}")
-            
             return Response({
                 'success': True,
                 'auth_url': authorization_url,
@@ -331,8 +297,6 @@ class NoteViewSet(viewsets.ModelViewSet):
             
         except Exception as e:
             logger.error(f"Auth URL generation error: {str(e)}")
-            import traceback
-            logger.error(traceback.format_exc())
             return Response({
                 'success': False,
                 'error': str(e)
@@ -340,9 +304,7 @@ class NoteViewSet(viewsets.ModelViewSet):
         
     @action(detail=False, methods=['get'])
     def daily_report(self, request):
-        """
-        USER-based daily report (works even if no notes exist)
-        """
+        """User-based daily report"""
         try:
             report_data = DailyNotesReportService.generate_daily_report(request.user)
 
@@ -371,12 +333,9 @@ class NoteViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
-
     @action(detail=False, methods=['post'])
     def send_daily_report_email(self, request):
-        """
-        Send daily report email (no note ID required)
-        """
+        """Send daily report email"""
         try:
             report_data = DailyNotesReportService.generate_daily_report(request.user)
             success = DailyNotesReportService.send_daily_report_email(
@@ -401,9 +360,8 @@ class NoteViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
-    
     def destroy(self, request, *args, **kwargs):
-        """Delete note with proper cleanup"""
+        """Delete note using NoteService"""
         note = self.get_object()
         note_title = note.title
         
@@ -423,16 +381,15 @@ class NoteViewSet(viewsets.ModelViewSet):
                             [note.id]
                         )
                 
-                # Delete note (cascade will handle related objects)
-                note.delete()
+                # Use NoteService to delete
+                NoteService.delete_note(note)
             
             return Response({
                 'message': f'Note "{note_title}" deleted successfully',
                 'success': True
             })
         except Exception as e:
-            import traceback
-            print(f"Delete Error: {traceback.format_exc()}")
+            logger.error(f"Delete Error: {str(e)}")
             return Response({
                 'error': f'Failed to delete note: {str(e)}',
                 'success': False
@@ -451,6 +408,7 @@ class ChapterViewSet(viewsets.ModelViewSet):
         ).prefetch_related('topics').order_by('order')
     
     def create(self, request):
+        """Create chapter using ChapterService"""
         note_id = request.data.get('note_id')
         
         if not note_id:
@@ -477,69 +435,51 @@ class ChapterViewSet(viewsets.ModelViewSet):
         # Check if chapter with same title exists (case-insensitive)
         if Chapter.objects.check_exists('title', title, note=note):
             return Response(
-                {'error': f'A chapter titled "{title}" already exists in this note (case-insensitive). Please use a different name.'},
+                {'error': f'A chapter titled "{title}" already exists in this note (case-insensitive).'},
                 status=status.HTTP_400_BAD_REQUEST
             )
-        
-        # Get next order number
-        max_order_result = Chapter.objects.filter(note=note).aggregate(
-            max_order=Max('order')
-        )
-        max_order = max_order_result['max_order']
-        next_order = (max_order + 1) if max_order is not None else 0
         
         try:
-            chapter = Chapter.objects.create(
-                note=note,
-                title=title,
-                order=next_order
-            )
-        except IntegrityError:
-            return Response(
-                {'error': f'A chapter titled "{title}" already exists in this note. Please use a different name.'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
+            # Use ChapterService to create chapter
+            chapter = ChapterService.create_chapter(note, title)
+            serializer = self.get_serializer(chapter)
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+            
         except Exception as e:
-            import traceback
-            print(f"Chapter Creation Error: {traceback.format_exc()}")
+            logger.error(f"Chapter Creation Error: {str(e)}")
             return Response(
                 {'error': f'Failed to create chapter: {str(e)}'},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
-        
-        serializer = self.get_serializer(chapter)
-        return Response(serializer.data, status=status.HTTP_201_CREATED)
     
     def update(self, request, *args, **kwargs):
-        """Update chapter - support both PUT and PATCH"""
+        """Update chapter using ChapterService"""
         partial = kwargs.pop('partial', False)
         chapter = self.get_object()
         
         serializer = self.get_serializer(chapter, data=request.data, partial=partial)
         serializer.is_valid(raise_exception=True)
-        self.perform_update(serializer)
         
-        return Response(serializer.data)
+        try:
+            # Use ChapterService to update
+            updated_chapter = ChapterService.update_chapter(chapter, **serializer.validated_data)
+            response_serializer = self.get_serializer(updated_chapter)
+            return Response(response_serializer.data)
+        except Exception as e:
+            logger.error(f"Chapter update error: {str(e)}")
+            return Response(
+                {'error': 'Failed to update chapter'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
     
     def destroy(self, request, *args, **kwargs):
-        """Delete chapter with all its topics"""
+        """Delete chapter using ChapterService"""
         chapter = self.get_object()
         chapter_title = chapter.title
         
         try:
-            with transaction.atomic():
-                # Delete all topics and their related objects
-                for topic in chapter.topics.all():
-                    if topic.explanation:
-                        topic.explanation.delete()
-                    if topic.code_snippet:
-                        topic.code_snippet.delete()
-                    if topic.source:
-                        topic.source.delete()
-                    topic.delete()
-                
-                # Delete the chapter
-                chapter.delete()
+            # Use ChapterService to delete
+            ChapterService.delete_chapter(chapter)
             
             return Response(
                 {
@@ -549,6 +489,7 @@ class ChapterViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_200_OK
             )
         except Exception as e:
+            logger.error(f"Chapter delete error: {str(e)}")
             return Response(
                 {
                     'error': f'Failed to delete chapter: {str(e)}',
@@ -564,8 +505,7 @@ class ChapterViewSet(viewsets.ModelViewSet):
         new_order = request.data.get('order')
         
         if new_order is not None:
-            chapter.order = new_order
-            chapter.save()
+            ChapterService.update_chapter(chapter, order=new_order)
         
         serializer = self.get_serializer(chapter)
         return Response(serializer.data)
@@ -583,7 +523,7 @@ class TopicViewSet(viewsets.ModelViewSet):
         ).select_related('explanation', 'code_snippet', 'source').order_by('order')
     
     def create(self, request):
-        """Create topic with case-insensitive validation"""
+        """Create topic using TopicService"""
         serializer = TopicCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         
@@ -603,139 +543,61 @@ class TopicViewSet(viewsets.ModelViewSet):
         # Check if topic with same name exists (case-insensitive)
         if ChapterTopic.objects.check_exists('name', topic_name, chapter=chapter):
             return Response(
-                {'error': f'Topic "{topic_name}" already exists in this chapter (case-insensitive). Please use a different name.'},
+                {'error': f'Topic "{topic_name}" already exists in this chapter (case-insensitive).'},
                 status=status.HTTP_400_BAD_REQUEST
             )
         
-        # Calculate next order number
-        max_order_result = ChapterTopic.objects.filter(chapter=chapter).aggregate(
-            max_order=Max('order')
-        )
-        max_order = max_order_result['max_order']
-        next_order = (max_order + 1) if max_order is not None else 0
-
         try:
-            with transaction.atomic():
-                # Create topic
-                topic = ChapterTopic.objects.create(
-                    chapter=chapter,
-                    name=topic_name,
-                    order=next_order
-                )
-
-                # Create explanation if provided
-                if data.get('explanation_content'):
-                    explanation = TopicExplanation.objects.create(
-                        content=data['explanation_content']
-                    )
-                    topic.explanation = explanation
-
-                # Create code snippet if provided
-                if data.get('code_content'):
-                    code = TopicCodeSnippet.objects.create(
-                        language=data.get('code_language', 'python'),
-                        code=data['code_content']
-                    )
-                    topic.code_snippet = code
-
-                # Create source if provided
-                if data.get('source_url'):
-                    source = TopicSource.objects.create(
-                        title=data.get('source_title', 'Reference'),
-                        url=data['source_url']
-                    )
-                    topic.source = source
-
-                topic.save()
-
-        except IntegrityError:
+            # Use TopicService to create topic
+            topic = TopicService.create_topic(
+                chapter=chapter,
+                name=topic_name,
+                explanation_content=data.get('explanation_content'),
+                code_language=data.get('code_language', 'python'),
+                code_content=data.get('code_content'),
+                source_title=data.get('source_title'),
+                source_url=data.get('source_url')
+            )
+            
+            response_serializer = ChapterTopicSerializer(topic)
+            return Response(response_serializer.data, status=status.HTTP_201_CREATED)
+            
+        except Exception as e:
+            logger.error(f"Topic creation error: {str(e)}")
             return Response(
-                {'error': f'Topic "{topic_name}" already exists in this chapter. Please use a different name.'},
+                {'error': f'Failed to create topic: {str(e)}'},
                 status=status.HTTP_400_BAD_REQUEST
             )
-        
-        response_serializer = ChapterTopicSerializer(topic)
-        return Response(response_serializer.data, status=status.HTTP_201_CREATED)
 
     def update(self, request, *args, **kwargs):
-        """Update topic and its components - FIXED partial parameter"""
-        # Handle partial parameter correctly
+        """Update topic using TopicService"""
         partial = kwargs.pop('partial', False)
-        
         topic = self.get_object()
-        serializer = TopicUpdateSerializer(data=request.data, partial=True)  # Always allow partial
+        
+        serializer = TopicUpdateSerializer(data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
         
-        data = serializer.validated_data
-        
-        with transaction.atomic():
-            # Update topic fields
-            if 'name' in data:
-                topic.name = data['name']
-            if 'order' in data:
-                topic.order = data['order']
+        try:
+            # Use TopicService to update topic
+            updated_topic = TopicService.update_topic(topic, **serializer.validated_data)
+            response_serializer = ChapterTopicSerializer(updated_topic)
+            return Response(response_serializer.data)
             
-            # Update explanation
-            if 'explanation_content' in data:
-                if topic.explanation:
-                    topic.explanation.content = data['explanation_content']
-                    topic.explanation.save()
-                elif data['explanation_content']:
-                    explanation = TopicExplanation.objects.create(
-                        content=data['explanation_content']
-                    )
-                    topic.explanation = explanation
-            
-            # Update code snippet
-            if 'code_content' in data:
-                if topic.code_snippet:
-                    topic.code_snippet.code = data['code_content']
-                    if 'code_language' in data:
-                        topic.code_snippet.language = data['code_language']
-                    topic.code_snippet.save()
-                elif data['code_content']:
-                    code = TopicCodeSnippet.objects.create(
-                        language=data.get('code_language', 'python'),
-                        code=data['code_content']
-                    )
-                    topic.code_snippet = code
-            
-            # Update source
-            if 'source_url' in data:
-                if topic.source:
-                    topic.source.url = data['source_url']
-                    if 'source_title' in data:
-                        topic.source.title = data['source_title']
-                    topic.source.save()
-                elif data['source_url']:
-                    source = TopicSource.objects.create(
-                        title=data.get('source_title', 'Reference'),
-                        url=data['source_url']
-                    )
-                    topic.source = source
-            
-            topic.save()
-        
-        response_serializer = ChapterTopicSerializer(topic)
-        return Response(response_serializer.data)
+        except Exception as e:
+            logger.error(f"Topic update error: {str(e)}")
+            return Response(
+                {'error': 'Failed to update topic'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
     
     def destroy(self, request, *args, **kwargs):
-        """Delete topic with all its related objects"""
+        """Delete topic using TopicService"""
         topic = self.get_object()
         topic_name = topic.name
         
         try:
-            with transaction.atomic():
-                # Delete related objects
-                if topic.explanation:
-                    topic.explanation.delete()
-                if topic.code_snippet:
-                    topic.code_snippet.delete()
-                if topic.source:
-                    topic.source.delete()
-                
-                # Delete the topic
-                topic.delete()
+            # Use TopicService to delete
+            TopicService.delete_topic(topic)
             
             return Response(
                 {
@@ -745,6 +607,7 @@ class TopicViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_200_OK
             )
         except Exception as e:
+            logger.error(f"Topic delete error: {str(e)}")
             return Response(
                 {
                     'error': f'Failed to delete topic: {str(e)}',
@@ -755,7 +618,7 @@ class TopicViewSet(viewsets.ModelViewSet):
     
     @action(detail=True, methods=['post'])
     def ai_action(self, request, pk=None):
-        """Perform AI action on topic using Groq"""
+        """Perform AI action on topic"""
         topic = self.get_object()
         serializer = AIActionSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -764,7 +627,6 @@ class TopicViewSet(viewsets.ModelViewSet):
         input_content = serializer.validated_data['input_content']
         
         try:
-            # Perform AI action
             generated_content = None
             
             if action_type == 'generate_explanation':
@@ -793,13 +655,10 @@ class TopicViewSet(viewsets.ModelViewSet):
                 'success': True
             })
         except Exception as e:
-            import traceback
-            error_details = traceback.format_exc()
-            print(f"AI Action Error: {error_details}")
+            logger.error(f"AI Action Error: {str(e)}")
             return Response(
                 {
                     'error': f'AI action failed: {str(e)}',
-                    'details': error_details,
                     'success': False
                 },
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
@@ -812,8 +671,7 @@ class TopicViewSet(viewsets.ModelViewSet):
         new_order = request.data.get('order')
         
         if new_order is not None:
-            topic.order = new_order
-            topic.save()
+            TopicService.update_topic(topic, order=new_order)
         
         serializer = self.get_serializer(topic)
         return Response(serializer.data)
@@ -829,7 +687,12 @@ class NoteShareViewSet(viewsets.ModelViewSet):
         return NoteShare.objects.filter(
             Q(shared_by=self.request.user) | Q(shared_with=self.request.user)
         )
-# Add this function in views.py (before the execute_code view function)
+
+
+# ============================================================================
+# CODE EXECUTION API
+# ============================================================================
+
 def extract_input_requirements(code, language):
     """Check if code requires input"""
     if not code:
@@ -851,10 +714,11 @@ def extract_input_requirements(code, language):
                 return True
     return False
 
-# Update the execute_code view function
+
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def execute_code(request):
+    """Execute code with input support"""
     code = request.data.get('code', '')
     language = request.data.get('language', 'python')
     stdin = request.data.get('stdin', '')
@@ -891,23 +755,18 @@ def execute_code(request):
         
         # Format output for display
         if not result.get('success'):
-            # Try to extract useful error information
             error = result.get('error', '')
             if not error and result.get('output'):
-                # Sometimes errors are in output
                 error = result.get('output')
             
-            # Format the error with line numbers
             result['formatted_error'] = format_error_output(
                 error,
                 language,
                 code
             )
         else:
-            # Format successful output nicely
             output = result.get('output', '').strip()
             if output:
-                # Add success indicator
                 result['formatted_output'] = f"✅ Execution Successful\n\n{output}"
                 if result.get('runtime_ms'):
                     result['formatted_output'] += f"\n\n⏱️ Runtime: {result['runtime_ms']}ms"
@@ -915,8 +774,7 @@ def execute_code(request):
         return Response(result)
         
     except Exception as e:
-        import traceback
-        logger.error(f"Code execution error: {traceback.format_exc()}")
+        logger.error(f"Code execution error: {str(e)}")
         return Response({
             'success': False,
             'output': '',
@@ -924,7 +782,7 @@ def execute_code(request):
             'formatted_error': f"🚨 Server Error\n\n{str(e)}\n\nPlease try again or contact support."
         }, status=500)
 
-# Update the format_error_output function
+
 def format_error_output(error_output, language, original_code):
     """Format error output to look like VS Code with line numbers"""
     if not error_output:
@@ -987,95 +845,5 @@ def format_error_output(error_output, language, original_code):
         formatted_error.append("• Check for missing semicolons or braces")
         formatted_error.append("• Verify all required imports/includes")
         formatted_error.append("• Check for type mismatches")
-    
-    return '\n'.join(formatted_error)
-
-# Add this view function
-@api_view(['POST'])
-@permission_classes([AllowAny])   # ✅ ADD
-def execute_code(request):
-    code = request.data.get('code', '')
-    language = request.data.get('language', 'python')
-    stdin = request.data.get('stdin', '')   # ✅ ADD THIS
-
-    if not code:
-        return Response({'success': False, 'error': 'No code provided'}, status=400)
-
-    try:
-        result = CodeExecutionService.execute_code(
-            code=code,
-            language=language,
-            stdin=stdin     # ✅ PASS IT
-        )
-
-        if not result.get('success'):
-            result['formatted_error'] = format_error_output(
-                result.get('error', ''),
-                language,
-                code
-            )
-
-        return Response(result)
-
-    except Exception as e:
-        return Response({
-            'success': False,
-            'output': '',
-            'error': str(e)
-        }, status=500)
-
-def format_error_output(error_output, language, original_code):
-    """Format error output to look like VS Code with line numbers"""
-    lines = original_code.split('\n')
-    formatted_error = []
-    
-    # Add line numbers to the code
-    for i, line in enumerate(lines, 1):
-        formatted_error.append(f"{i:3d} | {line}")
-    
-    formatted_error.append("\n" + "═" * 80 + "\n")
-    formatted_error.append("🚨 ERROR OUTPUT:\n")
-    
-    # Parse and format error messages
-    if language == 'python':
-        # Format Python errors
-        error_lines = error_output.split('\n')
-        for error_line in error_lines:
-            if 'File' in error_line and 'line' in error_line:
-                # Extract line number from traceback
-                import re
-                match = re.search(r'line (\d+)', error_line)
-                if match:
-                    line_num = int(match.group(1))
-                    formatted_error.append(f"❌ Error at line {line_num}: {error_line}")
-                else:
-                    formatted_error.append(f"❌ {error_line}")
-            elif 'Error:' in error_line or 'error:' in error_line.lower():
-                formatted_error.append(f"🔥 {error_line}")
-            elif error_line.strip():
-                formatted_error.append(f"   {error_line}")
-    elif language in ['javascript', 'typescript']:
-        # Format JavaScript errors
-        error_lines = error_output.split('\n')
-        for error_line in error_lines:
-            if 'at' in error_line and ('.js:' in error_line or '.ts:' in error_line):
-                formatted_error.append(f"🔧 {error_line}")
-            elif 'Error:' in error_line or 'error:' in error_line.lower():
-                formatted_error.append(f"🔥 {error_line}")
-            elif error_line.strip():
-                formatted_error.append(f"   {error_line}")
-    elif language in ['java', 'cpp', 'c']:
-        # Format Java/C++ errors
-        error_lines = error_output.split('\n')
-        for error_line in error_lines:
-            if '.java:' in error_line or '.cpp:' in error_line or '.c:' in error_line:
-                formatted_error.append(f"🔧 {error_line}")
-            elif 'error:' in error_line.lower() or 'Error:' in error_line:
-                formatted_error.append(f"🔥 {error_line}")
-            elif error_line.strip():
-                formatted_error.append(f"   {error_line}")
-    else:
-        # Generic formatting for other languages
-        formatted_error.append(error_output)
     
     return '\n'.join(formatted_error)
