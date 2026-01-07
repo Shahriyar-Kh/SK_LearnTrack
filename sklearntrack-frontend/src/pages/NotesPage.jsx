@@ -4,6 +4,7 @@ import {
   AlertCircle, CheckCircle2, Info, Edit, Save, BarChart3
 } from 'lucide-react';
 import { noteService } from '@/services/note.service';
+import Navbar from '@/components/layout/Navbar';
 import NoteStructure from '@/components/notes/NoteStructure';
 import TopicEditor from '@/components/notes/TopicEditor';
 import ExportButtons from '@/components/notes/ExportButtons';
@@ -214,34 +215,34 @@ const NotesPage = () => {
     }
   };
 
-const handleAIAction = async (action, input, language) => {
-  try {
-    if (!selectedTopic?.id) {
-      throw new Error('Please save the topic first before using AI features');
+  const handleAIAction = async (action, input, language) => {
+    try {
+      if (!selectedTopic?.id) {
+        throw new Error('Please save the topic first before using AI features');
+      }
+      
+      const data = await noteService.performAIAction(selectedTopic.id, {
+        action_type: action,
+        input_content: input,
+        language: language
+      });
+      
+      const actionMessages = {
+        'generate_explanation': 'Explanation generated successfully!',
+        'improve_explanation': 'Explanation improved successfully!',
+        'summarize_explanation': 'Summary generated successfully!',
+        'generate_code': 'Code generated successfully!'
+      };
+      showToast(actionMessages[action] || 'AI action completed!', 'info');
+      
+      // Return the generated content (which may be markdown)
+      return data.generated_content;
+    } catch (error) {
+      console.error('AI action error:', error);
+      const errorMessage = error.response?.data?.error || 'AI action failed';
+      throw new Error(errorMessage);
     }
-    
-    const data = await noteService.performAIAction(selectedTopic.id, {
-      action_type: action,
-      input_content: input,
-      language: language
-    });
-    
-    const actionMessages = {
-      'generate_explanation': 'Explanation generated successfully!',
-      'improve_explanation': 'Explanation improved successfully!',
-      'summarize_explanation': 'Summary generated successfully!',
-      'generate_code': 'Code generated successfully!'
-    };
-    showToast(actionMessages[action] || 'AI action completed!', 'info');
-    
-    // Return the generated content (which may be markdown)
-    return data.generated_content;
-  } catch (error) {
-    console.error('AI action error:', error);
-    const errorMessage = error.response?.data?.error || 'AI action failed';
-    throw new Error(errorMessage);
-  }
-};
+  };
 
   const handleDeleteNote = () => {
     if (!selectedNote) return;
@@ -292,6 +293,9 @@ const handleAIAction = async (action, input, language) => {
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
+      {/* Add Navbar */}
+      <Navbar />
+      
       {/* Toast Notifications */}
       {toast && (
         <div className="fixed top-4 right-4 z-50">
@@ -557,10 +561,10 @@ const handleAIAction = async (action, input, language) => {
         </div>
       )}
     
-    <DailyReportModal 
-      isOpen={showDailyReport} 
-      onClose={() => setShowDailyReport(false)}
-    />
+      <DailyReportModal 
+        isOpen={showDailyReport} 
+        onClose={() => setShowDailyReport(false)}
+      />
     </div>
   );
 };
