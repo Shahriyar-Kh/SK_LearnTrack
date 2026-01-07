@@ -5,6 +5,8 @@ import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-d
 import { Provider } from 'react-redux';
 import { Toaster } from 'react-hot-toast';
 import { store } from './store';
+// Add import
+import AIHistoryPage from './pages/AIHistoryPage';
 
 // Pages
 import HomePage from './pages/HomePage';
@@ -53,6 +55,9 @@ function App() {
               <NotesPage />
             </ProtectedRoute>
           } />
+           {/* Add route ai-history */}
+          <Route path="/ai-history" element={<ProtectedRoute><AIHistoryPage /></ProtectedRoute>} />
+
           <Route path="/roadmap" element={
             <ProtectedRoute>
               <RoadmapPage />
@@ -72,6 +77,7 @@ function App() {
           {/* 404 */}
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
+
       </Router>
     </Provider>
   );

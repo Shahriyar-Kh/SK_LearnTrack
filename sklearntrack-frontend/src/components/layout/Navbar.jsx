@@ -56,6 +56,13 @@ const Navbar = () => {
                 <BarChart3 size={18} />
                 Analytics
               </Link>
+              {/* // Add to navigation links */}
+            <Link 
+              to="/ai-history" 
+              className="text-gray-700 dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400"
+            >
+              AI History
+            </Link>
             </div>
           )}
 

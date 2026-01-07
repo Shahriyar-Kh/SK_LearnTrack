@@ -13,6 +13,7 @@ from django.db.models import Q, Count, Prefetch, Max
 from django.http import HttpResponse
 from django.utils import timezone
 from uuid import uuid4
+from .ai_history_service import AIHistoryService  # This is the correct relative import
 
 import os
 from django.conf import settings
@@ -26,9 +27,10 @@ from .services import NoteService, ChapterService, TopicService
 from .models import (
     Note, Chapter, ChapterTopic, TopicExplanation,
     TopicCodeSnippet, TopicSource, NoteVersion,
-    AIGeneratedContent, NoteShare
+    AIGeneratedContent, NoteShare, AIHistory
 )
 from .serializers import (
+    AIHistoryCreateSerializer, AIHistorySerializer, AIHistoryUpdateSerializer, 
     NoteListSerializer, NoteDetailSerializer, NoteCreateSerializer, ChapterSerializer,
     ChapterTopicSerializer, NoteVersionSerializer, AIGeneratedContentSerializer,
     NoteShareSerializer, AIActionSerializer, TopicCreateSerializer,
@@ -43,7 +45,6 @@ from .ai_service import (
 from .pdf_service import export_note_to_pdf
 
 logger = logging.getLogger(__name__)
-
 
 class NoteViewSet(viewsets.ModelViewSet):
     """Note CRUD with chapters and topics"""
@@ -617,8 +618,8 @@ class TopicViewSet(viewsets.ModelViewSet):
             )
     
     @action(detail=True, methods=['post'])
-    def ai_action(self, request, pk=None):
-        """Perform AI action on topic"""
+    def ai_action(request, pk=None):
+        """Perform AI action on topic and save to history"""
         topic = self.get_object()
         serializer = AIActionSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -639,7 +640,17 @@ class TopicViewSet(viewsets.ModelViewSet):
                 language = serializer.validated_data.get('language', 'python')
                 generated_content = generate_ai_code(input_content, language)
             
-            # Save AI generation record
+            # Create AI History record
+            history = AIHistoryService.create_history(
+                user=request.user,
+                action_type=action_type,
+                prompt=input_content,
+                generated_content=generated_content,
+                language=serializer.validated_data.get('language'),
+                title=f"{topic.name} - {action_type.replace('_', ' ').title()}"
+            )
+            
+            # Also save to AIGeneratedContent (for topic reference)
             AIGeneratedContent.objects.create(
                 user=request.user,
                 topic=topic,
@@ -649,10 +660,13 @@ class TopicViewSet(viewsets.ModelViewSet):
                 model_used='llama-3.3-70b-versatile'
             )
             
+            logger.info(f"AI action {action_type} completed for topic {topic.id}, history {history.id}")
+            
             return Response({
                 'generated_content': generated_content,
                 'action_type': action_type,
-                'success': True
+                'success': True,
+                'history_id': history.id
             })
         except Exception as e:
             logger.error(f"AI Action Error: {str(e)}")
@@ -847,3 +861,223 @@ def format_error_output(error_output, language, original_code):
         formatted_error.append("• Check for type mismatches")
     
     return '\n'.join(formatted_error)
+
+# ============================================================================
+# AI HISTORY VIEWSET
+class AIHistoryViewSet(viewsets.ModelViewSet):
+    """AI History CRUD and export operations"""
+    
+    permission_classes = [permissions.IsAuthenticated]
+    
+    def get_serializer_class(self):
+        if self.action == 'create':
+            return AIHistoryCreateSerializer
+        elif self.action in ['update', 'partial_update']:
+            return AIHistoryUpdateSerializer
+        return AIHistorySerializer
+    
+    def get_queryset(self):
+        """Get AI history for current user only"""
+        queryset = AIHistory.objects.filter(user=self.request.user)
+        
+        # Filters
+        action_type = self.request.query_params.get('action_type')
+        if action_type:
+            queryset = queryset.filter(action_type=action_type)
+        
+        status_param = self.request.query_params.get('status')
+        if status_param:
+            queryset = queryset.filter(status=status_param)
+        
+        return queryset.order_by('-created_at')
+    
+    def create(self, request, *args, **kwargs):
+        """Create AI history record"""
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        
+        try:
+            history = AIHistoryService.create_history(
+                user=request.user,
+                **serializer.validated_data
+            )
+            
+            response_serializer = AIHistorySerializer(history)
+            return Response(response_serializer.data, status=status.HTTP_201_CREATED)
+            
+        except Exception as e:
+            logger.error(f"AI History creation error: {str(e)}")
+            return Response(
+                {'error': f'Failed to create history: {str(e)}'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+    
+    def update(self, request, *args, **kwargs):
+        """Update AI history record"""
+        partial = kwargs.pop('partial', False)
+        history = self.get_object()
+        
+        serializer = self.get_serializer(history, data=request.data, partial=partial)
+        serializer.is_valid(raise_exception=True)
+        
+        try:
+            updated_history = AIHistoryService.update_history(
+                history, 
+                **serializer.validated_data
+            )
+            
+            response_serializer = AIHistorySerializer(updated_history)
+            return Response(response_serializer.data)
+            
+        except Exception as e:
+            logger.error(f"AI History update error: {str(e)}")
+            return Response(
+                {'error': 'Failed to update history'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+    
+    def destroy(self, request, *args, **kwargs):
+        """Delete AI history record"""
+        history = self.get_object()
+        history_title = history.title
+        
+        try:
+            AIHistoryService.delete_history(history)
+            
+            return Response(
+                {
+                    'message': f'AI history "{history_title}" deleted successfully',
+                    'success': True
+                }
+            )
+        except Exception as e:
+            logger.error(f"AI History delete error: {str(e)}")
+            return Response(
+                {'error': f'Failed to delete history: {str(e)}'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+    
+    @action(detail=True, methods=['post'])
+    def export_pdf(self, request, pk=None):
+        """Export AI history to PDF"""
+        history = self.get_object()
+        
+        try:
+            pdf_file = AIHistoryService.export_to_pdf(history)
+            
+            response = HttpResponse(pdf_file.read(), content_type='application/pdf')
+            filename = AIHistoryService.generate_filename(history)
+            
+            # Ensure PDF extension
+            if not filename.endswith('.pdf'):
+                filename = filename.rsplit('.', 1)[0] + '.pdf'
+            
+            response['Content-Disposition'] = f'attachment; filename="{filename}"'
+            response['Content-Length'] = pdf_file.size
+            
+            logger.info(f"AI History PDF exported: {history.id}")
+            return response
+            
+        except Exception as e:
+            logger.error(f"AI History PDF export error: {str(e)}")
+            return Response(
+                {'error': f'Failed to export PDF: {str(e)}'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+    
+    @action(detail=True, methods=['post'])
+    def export_to_drive(self, request, pk=None):
+        """Export AI history to Google Drive"""
+        history = self.get_object()
+        
+        try:
+            drive_service = GoogleDriveService(request.user)
+            
+            # Get appropriate folder name and create if needed
+            folder_name = AIHistoryService.get_drive_folder_name(history.action_type)
+            folder_id = drive_service.create_folder_if_not_exists(folder_name)
+            
+            # Prepare content
+            file_content, filename, mime_type = AIHistoryService.prepare_drive_content(history)
+            
+            # Upload to Drive
+            result = drive_service.upload_or_update_pdf(
+                file_content,
+                filename,
+                existing_file_id=history.drive_file_id,
+                folder_id=folder_id
+            )
+            
+            if result['success']:
+                # Update history
+                history.drive_file_id = result['id']
+                history.drive_folder = folder_name
+                history.last_drive_sync_at = timezone.now()
+                history.save()
+                
+                return Response({
+                    'success': True,
+                    'message': 'Updated in Google Drive' if result.get('updated') else 'Uploaded to Google Drive',
+                    'drive_link': result.get('webViewLink'),
+                    'file_id': result.get('id'),
+                    'folder': folder_name,
+                    'updated': result.get('updated', False)
+                })
+            else:
+                return Response({
+                    'success': False,
+                    'error': result.get('error')
+                }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+                
+        except Exception as e:
+            error_msg = str(e)
+            if 'authentication required' in error_msg.lower():
+                return Response({
+                    'success': False,
+                    'error': 'Google Drive authentication required',
+                    'needs_auth': True
+                }, status=status.HTTP_401_UNAUTHORIZED)
+            
+            logger.error(f"AI History Drive export error: {str(e)}")
+            return Response({
+                'success': False,
+                'error': error_msg
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    
+    @action(detail=True, methods=['post'])
+    def mark_saved(self, request, pk=None):
+        """Mark history as permanently saved"""
+        history = self.get_object()
+        
+        try:
+            history.status = 'saved'
+            history.save()
+            
+            logger.info(f"Marked AI history {history.id} as saved")
+            serializer = AIHistorySerializer(history)
+            return Response(serializer.data)
+            
+        except Exception as e:
+            return Response(
+                {'error': str(e)},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+    
+    @action(detail=False, methods=['post'])
+    def cleanup_old(self, request):
+        """Delete old temporary records"""
+        days = int(request.data.get('days', 7))
+        
+        try:
+            count = AIHistoryService.delete_temporary_old_records(days)
+            return Response({
+                'success': True,
+                'deleted_count': count,
+                'message': f'Deleted {count} old temporary records'
+            })
+        except Exception as e:
+            logger.error(f"Cleanup error: {str(e)}")
+            return Response(
+                {'error': str(e)},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )

@@ -388,3 +388,68 @@ class NoteShare(models.Model):
         if self.is_public:
             return f"Public: {self.note.title}"
         return f"{self.note.title} -> {self.shared_with.username if self.shared_with else 'Public'}"
+
+
+# MOVE THIS OUTSIDE THE NoteShare class - it's currently nested inside!
+class AIHistory(models.Model):
+    """Track all AI generation history for users"""
+    
+    AI_ACTION_TYPES = [
+        ('generate_explanation', 'Generate Explanation'),
+        ('improve_explanation', 'Improve Explanation'),
+        ('summarize_explanation', 'Summarize Explanation'),
+        ('generate_code', 'Generate Code'),
+    ]
+    
+    STATUS_CHOICES = [
+        ('temporary', 'Temporary'),
+        ('saved', 'Saved'),
+    ]
+    
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='ai_history'
+    )
+    action_type = models.CharField(max_length=50, choices=AI_ACTION_TYPES)
+    prompt = models.TextField(help_text="User's input/prompt")
+    generated_content = models.TextField(help_text="AI generated output")
+    language = models.CharField(max_length=20, null=True, blank=True)  # For code generation
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='temporary')
+    
+    # Google Drive integration
+    drive_file_id = models.CharField(max_length=255, null=True, blank=True)
+    drive_folder = models.CharField(max_length=100, null=True, blank=True)
+    last_drive_sync_at = models.DateTimeField(null=True, blank=True)
+    
+    # PDF export
+    pdf_generated = models.BooleanField(default=False)
+    pdf_path = models.CharField(max_length=500, null=True, blank=True)
+    
+    # Metadata
+    title = models.CharField(max_length=255, help_text="Auto-generated or user-defined title")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        db_table = 'ai_history'
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['user', 'action_type']),
+            models.Index(fields=['user', 'status']),
+            models.Index(fields=['created_at']),
+        ]
+    
+    def __str__(self):
+        return f"{self.user.email} - {self.get_action_type_display()} - {self.created_at}"
+    
+    def generate_title(self):
+        """Auto-generate title from prompt"""
+        if len(self.prompt) > 50:
+            return self.prompt[:50] + "..."
+        return self.prompt
+    
+    def save(self, *args, **kwargs):
+        if not self.title:
+            self.title = self.generate_title()
+        super().save(*args, **kwargs)

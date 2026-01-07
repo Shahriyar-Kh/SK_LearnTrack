@@ -5,7 +5,7 @@ from rest_framework import serializers
 from .models import (
     Note, Chapter, ChapterTopic, TopicExplanation, 
     TopicCodeSnippet, TopicSource, NoteVersion, 
-    AIGeneratedContent, NoteShare
+    AIGeneratedContent, NoteShare, AIHistory
 )
 import os
 from django.conf import settings
@@ -264,3 +264,44 @@ class TopicUpdateSerializer(serializers.Serializer):
     code_content = serializers.CharField(required=False, allow_blank=True)
     source_title = serializers.CharField(required=False, allow_blank=True)
     source_url = serializers.URLField(required=False, allow_blank=True)
+
+
+class AIHistorySerializer(serializers.ModelSerializer):
+    """Serializer for AI History"""
+    action_type_display = serializers.CharField(source='get_action_type_display', read_only=True)
+    
+    class Meta:
+        model = AIHistory
+        fields = [
+            'id', 'action_type', 'action_type_display', 'prompt', 
+            'generated_content', 'language', 'status', 'title',
+            'drive_file_id', 'drive_folder', 'last_drive_sync_at',
+            'pdf_generated', 'pdf_path', 'created_at', 'updated_at'
+        ]
+        read_only_fields = ['id', 'created_at', 'updated_at', 'action_type_display']
+
+
+class AIHistoryCreateSerializer(serializers.ModelSerializer):
+    """Serializer for creating AI History"""
+    
+    class Meta:
+        model = AIHistory
+        fields = [
+            'action_type', 'prompt', 'generated_content', 
+            'language', 'title', 'status'
+        ]
+        
+    def validate(self, data):
+        if data['action_type'] == 'generate_code' and not data.get('language'):
+            raise serializers.ValidationError({
+                'language': 'Language is required for code generation'
+            })
+        return data
+
+
+class AIHistoryUpdateSerializer(serializers.ModelSerializer):
+    """Serializer for updating AI History"""
+    
+    class Meta:
+        model = AIHistory
+        fields = ['title', 'generated_content', 'status']

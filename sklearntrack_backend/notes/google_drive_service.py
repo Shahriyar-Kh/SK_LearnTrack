@@ -1,4 +1,4 @@
-# FILE: notes/google_drive_service.py - UNIFIED SERVICE
+# FILE: notes/google_drive_service.py - ENHANCED VERSION
 # ============================================================================
 
 from google.oauth2.credentials import Credentials
@@ -8,19 +8,15 @@ from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseUpload
 from googleapiclient.errors import HttpError
 from django.conf import settings
-from django.core.mail import EmailMessage
 from django.utils import timezone
 import os
 import pickle
 import logging
-import secrets
-from io import BytesIO
-from datetime import datetime, timedelta
 
 logger = logging.getLogger(__name__)
 
 SCOPES = ['https://www.googleapis.com/auth/drive.file']
-FOLDER_NAME = 'SK-LearnTrack Notes'
+MAIN_FOLDER_NAME = 'SK-LearnTrack Notes'
 
 
 class GoogleDriveService:
@@ -30,6 +26,7 @@ class GoogleDriveService:
         self.user = user
         self.creds = None
         self.service = None
+        self.folder_cache = {}  # Cache folder IDs
         self._authenticate()
     
     def _get_token_path(self):
@@ -86,11 +83,20 @@ class GoogleDriveService:
             logger.error(f"Error checking connection: {e}")
             return False
     
-    def get_or_create_folder(self):
-        """Get or create SK-LearnTrack Notes folder"""
+    def get_or_create_folder(self, folder_name=MAIN_FOLDER_NAME, parent_id=None):
+        """Get or create folder (with caching)"""
+        cache_key = f"{parent_id}:{folder_name}"
+        
+        # Check cache
+        if cache_key in self.folder_cache:
+            return self.folder_cache[cache_key]
+        
         try:
             # Search for existing folder
-            query = f"name='{FOLDER_NAME}' and mimeType='application/vnd.google-apps.folder' and trashed=false"
+            query = f"name='{folder_name}' and mimeType='application/vnd.google-apps.folder' and trashed=false"
+            if parent_id:
+                query += f" and '{parent_id}' in parents"
+            
             results = self.service.files().list(
                 q=query,
                 spaces='drive',
@@ -100,52 +106,72 @@ class GoogleDriveService:
             folders = results.get('files', [])
             
             if folders:
-                logger.info(f"Found existing folder for user {self.user.id}")
-                return folders[0]['id']
+                folder_id = folders[0]['id']
+                logger.info(f"Found existing folder '{folder_name}' for user {self.user.id}")
+            else:
+                # Create new folder
+                file_metadata = {
+                    'name': folder_name,
+                    'mimeType': 'application/vnd.google-apps.folder'
+                }
+                if parent_id:
+                    file_metadata['parents'] = [parent_id]
+                
+                folder = self.service.files().create(
+                    body=file_metadata,
+                    fields='id'
+                ).execute()
+                
+                folder_id = folder['id']
+                logger.info(f"Created folder '{folder_name}' for user {self.user.id}")
             
-            # Create new folder
-            file_metadata = {
-                'name': FOLDER_NAME,
-                'mimeType': 'application/vnd.google-apps.folder'
-            }
-            
-            folder = self.service.files().create(
-                body=file_metadata,
-                fields='id'
-            ).execute()
-            
-            logger.info(f"Created folder '{FOLDER_NAME}' for user {self.user.id}")
-            return folder['id']
+            # Cache the folder ID
+            self.folder_cache[cache_key] = folder_id
+            return folder_id
             
         except HttpError as e:
-            logger.error(f"Error managing folder: {e}")
-            raise Exception(f"Failed to create folder: {str(e)}")
-        except Exception as e:
-            logger.error(f"Unexpected error: {e}")
-            raise
+            logger.error(f"Error managing folder '{folder_name}': {e}")
+            raise Exception(f"Failed to create/get folder: {str(e)}")
     
-    def upload_or_update_pdf(self, pdf_file, filename, existing_file_id=None):
+    def create_folder_if_not_exists(self, folder_name):
+        """Create folder inside main SK-LearnTrack folder"""
+        # First, get or create main folder
+        main_folder_id = self.get_or_create_folder(MAIN_FOLDER_NAME)
+        
+        # Then, get or create subfolder
+        subfolder_id = self.get_or_create_folder(folder_name, parent_id=main_folder_id)
+        
+        return subfolder_id
+    
+    def upload_or_update_pdf(self, file_content, filename, existing_file_id=None, folder_id=None):
         """
-        Upload new PDF or update existing one
+        Upload new file or update existing one
         
         Args:
-            pdf_file: BytesIO PDF content
+            file_content: BytesIO or ContentFile
             filename: Name for the file
             existing_file_id: If provided, updates existing file
+            folder_id: Parent folder ID (optional)
             
         Returns:
             dict: File metadata
         """
         try:
             # Ensure we're at the start of the file
-            if hasattr(pdf_file, 'seek'):
-                pdf_file.seek(0)
+            if hasattr(file_content, 'seek'):
+                file_content.seek(0)
             
-            folder_id = self.get_or_create_folder()
+            # Determine MIME type from filename
+            if filename.endswith('.pdf'):
+                mime_type = 'application/pdf'
+            elif filename.endswith(('.py', '.js', '.java', '.cpp', '.c', '.go')):
+                mime_type = 'text/plain'
+            else:
+                mime_type = 'application/octet-stream'
             
             media = MediaIoBaseUpload(
-                pdf_file,
-                mimetype='application/pdf',
+                file_content,
+                mimetype=mime_type,
                 resumable=True
             )
             
@@ -177,9 +203,11 @@ class GoogleDriveService:
             # CREATE new file
             file_metadata = {
                 'name': filename,
-                'parents': [folder_id],
-                'mimeType': 'application/pdf'
+                'mimeType': mime_type
             }
+            
+            if folder_id:
+                file_metadata['parents'] = [folder_id]
             
             file = self.service.files().create(
                 body=file_metadata,
@@ -188,12 +216,15 @@ class GoogleDriveService:
             ).execute()
             
             # Set file permissions to accessible by link
-            self.service.permissions().create(
-                fileId=file['id'],
-                body={'type': 'anyone', 'role': 'reader'}
-            ).execute()
+            try:
+                self.service.permissions().create(
+                    fileId=file['id'],
+                    body={'type': 'anyone', 'role': 'reader'}
+                ).execute()
+            except Exception as e:
+                logger.warning(f"Could not set file permissions: {e}")
             
-            logger.info(f"Created new file for user {self.user.id}")
+            logger.info(f"Created new file '{filename}' for user {self.user.id}")
             
             return {
                 'id': file['id'],
@@ -236,6 +267,7 @@ class GoogleAuthService:
     def get_oauth_url(request):
         """Generate Google OAuth URL"""
         try:
+            import secrets
             client_secret_path = os.path.join(
                 settings.BASE_DIR.parent,
                 'client_secret.json'
@@ -244,19 +276,17 @@ class GoogleAuthService:
             if not os.path.exists(client_secret_path):
                 raise Exception("Google Drive not configured. Please add client_secret.json")
             
-            # Generate secure state token WITH user_id embedded
+            # Generate secure state token
             random_token = secrets.token_urlsafe(32)
-            state = f"{request.user.id}:{random_token}"  # FIX: Use colon consistently
+            state = f"{request.user.id}:{random_token}"
             
             # Store in session
             request.session['google_auth_state'] = state
             request.session['google_auth_user_id'] = request.user.id
             request.session.modified = True
-            
-            # Force session save
             request.session.save()
             
-            logger.info(f"Generated state for user {request.user.id}: {state}")
+            logger.info(f"Generated auth state for user {request.user.id}")
             
             flow = Flow.from_client_secrets_file(
                 client_secret_path,

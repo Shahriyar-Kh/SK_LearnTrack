@@ -1,23 +1,25 @@
-# FILE: notes/urls.py
+# FILE: notes/urls.py - FIXED VERSION
 # ============================================================================
 
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
-from .views import NoteViewSet, ChapterViewSet, TopicViewSet, NoteShareViewSet
 from .google_callback import GoogleOAuthCallbackView
-from .views import execute_code
+from . import views
 
 router = DefaultRouter()
-router.register(r'notes', NoteViewSet, basename='note')
-router.register(r'chapters', ChapterViewSet, basename='chapter')
-router.register(r'topics', TopicViewSet, basename='topic')
-router.register(r'shares', NoteShareViewSet, basename='share')
+router.register(r'notes', views.NoteViewSet, basename='note')
+router.register(r'chapters', views.ChapterViewSet, basename='chapter')
+router.register(r'topics', views.TopicViewSet, basename='topic')
+router.register(r'shares', views.NoteShareViewSet, basename='share')
+router.register(r'ai-history', views.AIHistoryViewSet, basename='ai-history')
 
 urlpatterns = [
-    # Put the callback URL BEFORE the router includes
-    path('notes/google-callback/', GoogleOAuthCallbackView.as_view(), name='google_callback'),
-    # Put run_code BEFORE the router includes
-    path('notes/run_code/', execute_code, name='run_code'),
+    # Callback URL - must be before router
+    path('google-callback/', GoogleOAuthCallbackView.as_view(), name='google_callback'),
+    
+    # Code execution - must be before router
+    path('run_code/', views.execute_code, name='run_code'),
+    
+    # Router includes all viewset URLs
     path('', include(router.urls)),
-
 ]
