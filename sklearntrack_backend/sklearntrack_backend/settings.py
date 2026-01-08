@@ -9,9 +9,12 @@ from decouple import config
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 # Security Settings
-SECRET_KEY = config('SECRET_KEY', default='django-insecure-dev-key-change-in-production')
-DEBUG = config('DEBUG', default=True, cast=bool)
-ALLOWED_HOSTS = config('ALLOWED_HOSTS', default='localhost,127.0.0.1,0.0.0.0').split(',')
+SECRET_KEY = config('SECRET_KEY')
+DEBUG = config('DEBUG', default=False, cast=bool)
+ALLOWED_HOSTS = config(
+    'ALLOWED_HOSTS',
+    default='sk-learntrack.onrender.com'
+).split(',')
 
 # Application Definition
 INSTALLED_APPS = [
@@ -325,17 +328,17 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 # Security Settings for Production
 if not DEBUG:
-    # SECURE_SSL_REDIRECT = True
-    # SESSION_COOKIE_SECURE = True
-    # CSRF_COOKIE_SECURE = True
-    # SECURE_BROWSER_XSS_FILTER = True
-    # SECURE_CONTENT_TYPE_NOSNIFF = True
-    # X_FRAME_OPTIONS = 'DENY'
-    pass
+    SECURE_SSL_REDIRECT = True
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
+    SECURE_BROWSER_XSS_FILTER = True
+    SECURE_CONTENT_TYPE_NOSNIFF = True
+    X_FRAME_OPTIONS = 'DENY'
+
 
 # Session settings for Google OAuth
 SESSION_COOKIE_SAMESITE = 'Lax'
-SESSION_COOKIE_SECURE = False  # Set to True in production with HTTPS
+SESSION_COOKIE_SECURE = True  # Set to True in production with HTTPS
 SESSION_COOKIE_HTTPONLY = True
 SESSION_COOKIE_NAME = 'sklearntrack_sessionid'
 SESSION_ENGINE = 'django.contrib.sessions.backends.db'
@@ -345,5 +348,10 @@ SESSION_EXPIRE_AT_BROWSER_CLOSE = False
 
 # Allow session to be passed in iframes/popups
 CSRF_COOKIE_SAMESITE = 'Lax'  # Same as SESSION_COOKIE_SAMESITE
-CSRF_COOKIE_SECURE = False  # Match SESSION_COOKIE_SECURE
-CSRF_TRUSTED_ORIGINS = ['http://localhost:8000', 'http://127.0.0.1:8000']
+CSRF_COOKIE_SECURE = True  # Match SESSION_COOKIE_SECURE
+CSRF_TRUSTED_ORIGINS = [
+    "https://sk-learntrack.onrender.com"
+]
+
+CELERY_TASK_ALWAYS_EAGER = True
+CELERY_TASK_EAGER_PROPAGATES = True
