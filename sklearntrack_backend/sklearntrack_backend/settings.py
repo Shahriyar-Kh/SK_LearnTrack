@@ -75,13 +75,11 @@ WSGI_APPLICATION = 'sklearntrack_backend.wsgi.application'
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.postgresql',
-        'NAME': config('DB_NAME', default='sklearntrack_db'),
+        'NAME': config('DB_NAME', default='postgres'),
         'USER': config('DB_USER', default='postgres'),
         'PASSWORD': config('DB_PASSWORD', default='postgres'),
         'HOST': config('DB_HOST', default='localhost'),
         'PORT': config('DB_PORT', default='5432'),
-        'ATOMIC_REQUESTS': True,  # Wrap each request in a transaction
-        'CONN_MAX_AGE': 600,  # Connection pooling
     }
 }
 
@@ -190,12 +188,8 @@ SIMPLE_JWT = {
 }
 
 # CORS Settings - CRITICAL FOR FRONTEND
-CORS_ALLOWED_ORIGINS = [
-    "http://localhost:3000",
-    "http://localhost:5173",
-    "http://127.0.0.1:3000",
-    "http://127.0.0.1:5173",
-]
+CORS_ALLOWED_ORIGINS.append("https://sk-learntrack.vercel.app")
+
 
 CORS_ALLOW_CREDENTIALS = True
 
