@@ -341,6 +341,53 @@ class AIGeneratedContent(models.Model):
     
     def __str__(self):
         return f"{self.get_action_type_display()} - {self.created_at}"
+class AIHistory(models.Model):
+    """Track AI feature usage for history and temporary storage"""
+    
+    FEATURE_TYPES = (
+        ('explain_topic', 'AI Explain Topic'),
+        ('improve', 'AI Improve'),
+        ('summarize', 'AI Summarize'),
+        ('generate_code', 'AI Generate Code'),
+    )
+    
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='ai_history'
+    )
+    feature_type = models.CharField(max_length=50, choices=FEATURE_TYPES)
+    title = models.CharField(max_length=500)  # Topic name or prompt
+    input_content = models.TextField(blank=True)
+    generated_content = models.TextField()
+    
+    # For code generation
+    language = models.CharField(max_length=50, blank=True, default='python')
+    
+    # Metadata
+    created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField(null=True, blank=True)  # TTL for temp storage
+    
+    # Google Drive integration
+    drive_file_id = models.CharField(max_length=255, blank=True, null=True)
+    
+    class Meta:
+        db_table = 'ai_history'
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['user', '-created_at']),
+            models.Index(fields=['user', 'feature_type']),
+        ]
+    
+    def __str__(self):
+        return f"{self.user.email} - {self.get_feature_type_display()} - {self.title}"
+    
+    def set_expiry(self, hours=24):
+        """Set expiry time for temporary storage"""
+        from django.utils import timezone
+        from datetime import timedelta
+        self.expires_at = timezone.now() + timedelta(hours=hours)
+        self.save()
 
 
 class NoteShare(models.Model):

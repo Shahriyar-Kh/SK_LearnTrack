@@ -1,5 +1,0 @@
-# Create requirements.txt file with all dependencies
-
-
-# Or save and install from requirements.txt
-# pip install -r requirements.txt

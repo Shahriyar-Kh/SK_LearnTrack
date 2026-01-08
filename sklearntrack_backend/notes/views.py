@@ -13,6 +13,8 @@ from django.db.models import Q, Count, Prefetch, Max
 from django.http import HttpResponse
 from django.utils import timezone
 from uuid import uuid4
+from .models import AIHistory
+from .serializers import AIHistorySerializer, AIToolActionSerializer
 
 import os
 from django.conf import settings
@@ -58,6 +60,7 @@ class NoteViewSet(viewsets.ModelViewSet):
         return NoteDetailSerializer
     
     def get_queryset(self):
+        # IMPORTANT: Always filter by current user
         queryset = Note.objects.filter(user=self.request.user).prefetch_related(
             Prefetch('chapters', queryset=Chapter.objects.order_by('order')),
             Prefetch('chapters__topics', queryset=ChapterTopic.objects.order_by('order').select_related(
@@ -403,6 +406,7 @@ class ChapterViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated]
     
     def get_queryset(self):
+        # Ensure user can only access their own chapters
         return Chapter.objects.filter(
             note__user=self.request.user
         ).prefetch_related('topics').order_by('order')
@@ -518,10 +522,64 @@ class TopicViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated]
     
     def get_queryset(self):
+        # Ensure user can only access their own topics
         return ChapterTopic.objects.filter(
             chapter__note__user=self.request.user
         ).select_related('explanation', 'code_snippet', 'source').order_by('order')
-    
+    @action(detail=True, methods=['post'])
+    def ai_action(self, request, pk=None):
+        """AI action - works BEFORE topic is saved"""
+        topic = None
+        if pk:
+            try:
+                topic = ChapterTopic.objects.get(
+                    pk=pk,
+                    chapter__note__user=request.user
+                )
+            except ChapterTopic.DoesNotExist:
+                return Response(
+                    {'error': 'Topic not found or access denied'},
+                    status=status.HTTP_403_FORBIDDEN
+                )
+        
+        action_type = request.data.get('action_type')
+        input_content = request.data.get('input_content', '')
+        
+        # FIX: Allow generation even without saved topic
+        if not input_content and topic:
+            input_content = topic.name
+        
+        if not input_content:
+            return Response(
+                {'error': 'Input content or topic name required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        try:
+            generated_content = None
+            
+            if action_type == 'generate_explanation':
+                generated_content = generate_ai_explanation(input_content)
+            elif action_type == 'improve_explanation':
+                generated_content = improve_explanation(input_content)
+            elif action_type == 'summarize_explanation':
+                generated_content = summarize_explanation(input_content)
+            elif action_type == 'generate_code':
+                language = request.data.get('language', 'python')
+                generated_content = generate_ai_code(input_content, language)
+            
+            return Response({
+                'generated_content': generated_content,
+                'action_type': action_type,
+                'success': True
+            })
+        except Exception as e:
+            logger.error(f"AI Action Error: {str(e)}")
+            return Response(
+                {'error': f'AI action failed: {str(e)}', 'success': False},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
     def create(self, request):
         """Create topic using TopicService"""
         serializer = TopicCreateSerializer(data=request.data)
@@ -616,54 +674,7 @@ class TopicViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
     
-    @action(detail=True, methods=['post'])
-    def ai_action(self, request, pk=None):
-        """Perform AI action on topic"""
-        topic = self.get_object()
-        serializer = AIActionSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        
-        action_type = serializer.validated_data['action_type']
-        input_content = serializer.validated_data['input_content']
-        
-        try:
-            generated_content = None
-            
-            if action_type == 'generate_explanation':
-                generated_content = generate_ai_explanation(input_content)
-            elif action_type == 'improve_explanation':
-                generated_content = improve_explanation(input_content)
-            elif action_type == 'summarize_explanation':
-                generated_content = summarize_explanation(input_content)
-            elif action_type == 'generate_code':
-                language = serializer.validated_data.get('language', 'python')
-                generated_content = generate_ai_code(input_content, language)
-            
-            # Save AI generation record
-            AIGeneratedContent.objects.create(
-                user=request.user,
-                topic=topic,
-                action_type=action_type,
-                input_content=input_content,
-                generated_content=generated_content,
-                model_used='llama-3.3-70b-versatile'
-            )
-            
-            return Response({
-                'generated_content': generated_content,
-                'action_type': action_type,
-                'success': True
-            })
-        except Exception as e:
-            logger.error(f"AI Action Error: {str(e)}")
-            return Response(
-                {
-                    'error': f'AI action failed: {str(e)}',
-                    'success': False
-                },
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
-            )
-    
+ 
     @action(detail=True, methods=['post'])
     def reorder(self, request, pk=None):
         """Reorder topic"""
@@ -847,3 +858,201 @@ def format_error_output(error_output, language, original_code):
         formatted_error.append("• Check for type mismatches")
     
     return '\n'.join(formatted_error)
+
+class AIToolsViewSet(viewsets.ViewSet):
+    """Standalone AI Tools with user isolation"""
+    permission_classes = [permissions.IsAuthenticated]
+    
+    @action(detail=False, methods=['post'])
+    def explain_topic(self, request):
+        title = request.data.get('title', '').strip()
+        save_to_history = request.data.get('save_to_history', True)
+        
+        if not title:
+            return Response({
+                'success': False,
+                'error': 'Title is required'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        try:
+            generated_content = generate_ai_explanation(title)
+            
+            history_item = None
+            if save_to_history:
+                history_item = AIHistory.objects.create(
+                    user=request.user,
+                    feature_type='explain_topic',
+                    title=title,
+                    input_content=title,
+                    generated_content=generated_content
+                )
+                history_item.set_expiry(hours=24)
+            
+            return Response({
+                'success': True,
+                'title': title,
+                'generated_content': generated_content,
+                'history_id': history_item.id if history_item else None,
+                'message': 'Explanation generated successfully'
+            })
+            
+        except Exception as e:
+            logger.error(f"AI Explain Topic error: {e}")
+            return Response({
+                'success': False,
+                'error': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    
+    @action(detail=False, methods=['post'])
+    def improve(self, request):
+        title = request.data.get('title', '').strip()
+        input_content = request.data.get('input_content', '').strip()
+        save_to_history = request.data.get('save_to_history', True)
+        
+        if not input_content:
+            return Response({
+                'success': False,
+                'error': 'Input content is required'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        try:
+            generated_content = improve_explanation(input_content)
+            
+            history_item = None
+            if save_to_history:
+                history_item = AIHistory.objects.create(
+                    user=request.user,
+                    feature_type='improve',
+                    title=title or 'Improved Content',
+                    input_content=input_content,
+                    generated_content=generated_content
+                )
+                history_item.set_expiry(hours=24)
+            
+            return Response({
+                'success': True,
+                'title': title,
+                'generated_content': generated_content,
+                'history_id': history_item.id if history_item else None,
+                'message': 'Content improved successfully'
+            })
+            
+        except Exception as e:
+            logger.error(f"AI Improve error: {e}")
+            return Response({
+                'success': False,
+                'error': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    
+    @action(detail=False, methods=['post'])
+    def summarize(self, request):
+        title = request.data.get('title', '').strip()
+        input_content = request.data.get('input_content', '').strip()
+        save_to_history = request.data.get('save_to_history', True)
+        
+        if not input_content:
+            return Response({
+                'success': False,
+                'error': 'Input content is required'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        try:
+            generated_content = summarize_explanation(input_content)
+            
+            history_item = None
+            if save_to_history:
+                history_item = AIHistory.objects.create(
+                    user=request.user,
+                    feature_type='summarize',
+                    title=title or 'Summary',
+                    input_content=input_content,
+                    generated_content=generated_content
+                )
+                history_item.set_expiry(hours=24)
+            
+            return Response({
+                'success': True,
+                'title': title,
+                'generated_content': generated_content,
+                'history_id': history_item.id if history_item else None,
+                'message': 'Content summarized successfully'
+            })
+            
+        except Exception as e:
+            logger.error(f"AI Summarize error: {e}")
+            return Response({
+                'success': False,
+                'error': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    
+    @action(detail=False, methods=['post'])
+    def generate_code(self, request):
+        title = request.data.get('title', '').strip()
+        language = request.data.get('language', 'python')
+        save_to_history = request.data.get('save_to_history', True)
+        
+        if not title:
+            return Response({
+                'success': False,
+                'error': 'Title is required'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        try:
+            generated_content = generate_ai_code(title, language)
+            
+            history_item = None
+            if save_to_history:
+                history_item = AIHistory.objects.create(
+                    user=request.user,
+                    feature_type='generate_code',
+                    title=title,
+                    input_content=title,
+                    generated_content=generated_content,
+                    language=language
+                )
+                history_item.set_expiry(hours=24)
+            
+            return Response({
+                'success': True,
+                'title': title,
+                'generated_content': generated_content,
+                'language': language,
+                'history_id': history_item.id if history_item else None,
+                'message': 'Code generated successfully'
+            })
+            
+        except Exception as e:
+            logger.error(f"AI Generate Code error: {e}")
+            return Response({
+                'success': False,
+                'error': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    
+    @action(detail=False, methods=['get'])
+    def history(self, request):
+        """Get AI history - ONLY for current user"""
+        feature_type = request.query_params.get('feature_type')
+        
+        queryset = AIHistory.objects.filter(user=request.user)
+        
+        if feature_type:
+            queryset = queryset.filter(feature_type=feature_type)
+        
+        queryset = queryset.order_by('-created_at')[:50]
+        
+        serializer = AIHistorySerializer(queryset, many=True)
+        return Response(serializer.data)
+    
+    @action(detail=True, methods=['delete'])
+    def delete_history(self, request, pk=None):
+        """Delete history - verify ownership"""
+        try:
+            history_item = AIHistory.objects.get(id=pk, user=request.user)
+            history_item.delete()
+            return Response({'success': True, 'message': 'History item deleted'})
+        except AIHistory.DoesNotExist:
+            return Response({
+                'success': False,
+                'error': 'History item not found or access denied'
+            }, status=status.HTTP_403_FORBIDDEN)
+

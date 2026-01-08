@@ -3,7 +3,7 @@
 
 from rest_framework import serializers
 from .models import (
-    Note, Chapter, ChapterTopic, TopicExplanation, 
+    AIHistory, Note, Chapter, ChapterTopic, TopicExplanation, 
     TopicCodeSnippet, TopicSource, NoteVersion, 
     AIGeneratedContent, NoteShare
 )
@@ -264,3 +264,32 @@ class TopicUpdateSerializer(serializers.Serializer):
     code_content = serializers.CharField(required=False, allow_blank=True)
     source_title = serializers.CharField(required=False, allow_blank=True)
     source_url = serializers.URLField(required=False, allow_blank=True)
+
+
+class AIHistorySerializer(serializers.ModelSerializer):
+    """Serializer for AI History"""
+    feature_display = serializers.CharField(source='get_feature_type_display', read_only=True)
+    
+    class Meta:
+        model = AIHistory
+        fields = [
+            'id', 'feature_type', 'feature_display', 'title', 
+            'input_content', 'generated_content', 'language',
+            'created_at', 'expires_at', 'drive_file_id'
+        ]
+        read_only_fields = ['created_at']
+
+
+class AIToolActionSerializer(serializers.Serializer):
+    """Serializer for standalone AI tool actions"""
+    feature_type = serializers.ChoiceField(choices=[
+        'explain_topic',
+        'improve',
+        'summarize',
+        'generate_code'
+    ])
+    title = serializers.CharField(max_length=500)  # Topic name or prompt
+    input_content = serializers.CharField(required=False, allow_blank=True)
+    language = serializers.CharField(required=False, default='python')
+    save_to_history = serializers.BooleanField(default=True)
+    

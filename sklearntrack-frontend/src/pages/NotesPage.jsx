@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { 
   Plus, FileText, Download, Trash2, Search, X, Loader, 
-  AlertCircle, CheckCircle2, Info, Edit, Save, BarChart3
+  AlertCircle, CheckCircle2, Info, Edit, Save, BarChart3, Sparkles
 } from 'lucide-react';
 import { noteService } from '@/services/note.service';
 import Navbar from '@/components/layout/Navbar';
@@ -9,6 +9,8 @@ import NoteStructure from '@/components/notes/NoteStructure';
 import TopicEditor from '@/components/notes/TopicEditor';
 import ExportButtons from '@/components/notes/ExportButtons';
 import DailyReportModal from '@/components/notes/DailyReportModal';
+import AIToolsSidebar from '@/components/notes/AIToolsSidebar';
+
 
 const NotesPage = () => {
   const [notes, setNotes] = useState([]);
@@ -17,6 +19,7 @@ const NotesPage = () => {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
+  const [showAITools, setShowAITools] = useState(false);
   
   // Modals
   const [showNewNoteModal, setShowNewNoteModal] = useState(false);
@@ -371,6 +374,14 @@ const NotesPage = () => {
                 <BarChart3 size={20} />
                 Daily Report
               </button>
+              {/* ADD this button in the header section (around line 260, after Daily Report button): */}
+              <button
+                onClick={() => setShowAITools(true)}
+                className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-purple-600 to-blue-600 text-white rounded-lg hover:from-purple-700 hover:to-blue-700 transition shadow-lg hover:shadow-xl transform hover:scale-105"
+              >
+                <Sparkles size={20} />
+                AI Tools
+              </button>
               <button
                 onClick={() => setShowNewNoteModal(true)}
                 className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition"
@@ -524,7 +535,13 @@ const NotesPage = () => {
             )}
           </div>
         </div>
-      </div>
+        {/* AI Tools Sidebar */}
+        <AIToolsSidebar 
+          isOpen={showAITools}
+          onClose={() => setShowAITools(false)}
+          noteService={noteService}
+        />
+              </div>
 
       {/* Modals */}
       {showNewNoteModal && (

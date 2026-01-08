@@ -3,6 +3,7 @@
 
 from django.contrib import admin
 from .models import (
+    AIHistory,
     Note,
     Chapter,
     ChapterTopic,
@@ -111,3 +112,10 @@ class NoteShareAdmin(admin.ModelAdmin):
     list_filter = ('permission', 'is_public', 'created_at')
     search_fields = ('note__title', 'shared_by__username', 'shared_with__username')
     readonly_fields = ('public_slug', 'created_at')
+
+@admin.register(AIHistory)
+class AIHistoryAdmin(admin.ModelAdmin):
+    list_display = ('user', 'feature_type', 'title', 'created_at')
+    list_filter = ('feature_type', 'created_at')
+    search_fields = ('user__email', 'title')
+    readonly_fields = ('created_at',)

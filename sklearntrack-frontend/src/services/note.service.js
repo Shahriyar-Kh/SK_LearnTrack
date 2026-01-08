@@ -319,7 +319,77 @@ runCode: async ({ code, language, stdin = "", timeout = 15 }) => {
     const response = await api.delete(API_ENDPOINTS.SNIPPET_DETAIL(id));
     return response.data;
   },
+  // ========================================================================
+// STANDALONE AI TOOLS
+// ========================================================================
+aiToolExplain: async (data) => {
+  const response = await api.post('/api/ai-tools/explain_topic/', data);
+  return response.data;
+},
+
+aiToolImprove: async (data) => {
+  const response = await api.post('/api/ai-tools/improve/', data);
+  return response.data;
+},
+
+aiToolSummarize: async (data) => {
+  const response = await api.post('/api/ai-tools/summarize/', data);
+  return response.data;
+},
+
+aiToolGenerateCode: async (data) => {
+  const response = await api.post('/api/ai-tools/generate_code/', data);
+  return response.data;
+},
+
+
+// Get AI history
+getAIHistory: async (featureType = null) => {
+  const params = featureType ? { feature_type: featureType } : {};
+  const response = await api.get('/api/ai-tools/history/', { params });
+  return response.data;
+},
+
+// Delete AI history item
+deleteAIHistory: async (historyId) => {
+  const response = await api.delete(`/api/ai-tools/${historyId}/delete_history/`);
+  return response.data;
+},
+
+// Save AI history as note
+saveAIHistoryAsNote: async (historyId) => {
+  const response = await api.post(`/api/ai-tools/${historyId}/save_as_note/`);
+  return response.data;
+},
+
+// Export AI history as PDF
+exportAIHistoryPDF: async (historyId) => {
+  const response = await api.post(`/api/ai-tools/${historyId}/export_pdf/`, {}, {
+    responseType: 'blob'
+  });
+  
+  // Create download
+  const blob = new Blob([response.data], { type: 'application/pdf' });
+  const url = window.URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `ai-content-${Date.now()}.pdf`;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  window.URL.revokeObjectURL(url);
+  
+  return { success: true };
+},
+
+// Export AI history to Google Drive
+exportAIHistoryToDrive: async (historyId) => {
+  const response = await api.post(`/api/ai-tools/${historyId}/export_to_drive/`);
+  return response.data;
+},
 };
+
+
 
 
 export default noteService;
