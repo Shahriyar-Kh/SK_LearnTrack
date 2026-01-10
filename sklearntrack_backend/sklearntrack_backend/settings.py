@@ -13,10 +13,14 @@ SECRET_KEY = config('SECRET_KEY')
 DEBUG = config('DEBUG', default=False, cast=bool)
 ALLOWED_HOSTS = [
     'sk-learntrack-pkw6.onrender.com',
-    'sk-learntrack.vercel.app',
+    '.onrender.com',
     'localhost',
     '127.0.0.1',
 ]
+# Add Render hostname if exists
+RENDER_EXTERNAL_HOSTNAME = os.environ.get('RENDER_EXTERNAL_HOSTNAME')
+if RENDER_EXTERNAL_HOSTNAME:
+    ALLOWED_HOSTS.append(RENDER_EXTERNAL_HOSTNAME)
 
 
 # Application Definition
@@ -130,7 +134,7 @@ AUTH_USER_MODEL = 'accounts.User'
 
 # Authentication Backends
 AUTHENTICATION_BACKENDS = [
-    'accounts.backends.EmailBackend',  # Custom email backend first
+    'accounts.backends.EmailBackend',  # Custom email backend
     'django.contrib.auth.backends.ModelBackend',  # Fallback
 ]
 
@@ -190,10 +194,11 @@ SIMPLE_JWT = {
     'SLIDING_TOKEN_REFRESH_LIFETIME': timedelta(days=1),
 }
 
-# CORS Settings - CRITICAL FOR FRONTEND
 CORS_ALLOWED_ORIGINS = [
     "https://sk-learntrack.vercel.app",
+    "https://sk-learntrack-pkw6.onrender.com",  # ADD THIS - Your actual backend URL
     "http://localhost:3000",  # For local development
+    "http://localhost:5173",  # Vite default port
 ]
 # Add Render's hostname to CORS_ALLOWED_ORIGINS
 RENDER_EXTERNAL_HOSTNAME = os.environ.get('RENDER_EXTERNAL_HOSTNAME')
@@ -201,6 +206,7 @@ if RENDER_EXTERNAL_HOSTNAME:
     CORS_ALLOWED_ORIGINS.append(f"https://{RENDER_EXTERNAL_HOSTNAME}")
 
 CORS_ALLOW_CREDENTIALS = True
+CORS_ALLOW_ALL_ORIGINS = False  # Keep this False for security
 
 CORS_ALLOW_METHODS = [
     'DELETE',
@@ -210,6 +216,7 @@ CORS_ALLOW_METHODS = [
     'POST',
     'PUT',
 ]
+
 CORS_ALLOW_HEADERS = [
     'accept',
     'accept-encoding',
@@ -221,7 +228,10 @@ CORS_ALLOW_HEADERS = [
     'x-csrftoken',
     'x-requested-with',
 ]
-
+CSRF_TRUSTED_ORIGINS = [
+    "https://sk-learntrack-pkw6.onrender.com",
+    "https://sk-learntrack.vercel.app",
+]
 # Email Configuration
 EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
 EMAIL_HOST = config('EMAIL_HOST', default='smtp.gmail.com')
@@ -351,9 +361,6 @@ SESSION_EXPIRE_AT_BROWSER_CLOSE = False
 # Allow session to be passed in iframes/popups
 CSRF_COOKIE_SAMESITE = 'Lax'  # Same as SESSION_COOKIE_SAMESITE
 CSRF_COOKIE_SECURE = True  # Match SESSION_COOKIE_SECURE
-CSRF_TRUSTED_ORIGINS = [
-    "https://sk-learntrack.onrender.com"
-]
 
 CELERY_TASK_ALWAYS_EAGER = True
 CELERY_TASK_EAGER_PROPAGATES = True

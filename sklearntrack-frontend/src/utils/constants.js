@@ -4,13 +4,14 @@
 export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL;
 
 export const API_ENDPOINTS = {
-  // Auth
+  // Auth - NO LEADING SLASH
   LOGIN: 'api/token/',
   REFRESH: 'api/token/refresh/',
   REGISTER: 'api/auth/register/',
   LOGOUT: 'api/auth/logout/',
   ME: 'api/auth/users/me/',
   UPDATE_PROFILE: 'api/auth/users/update_profile/',
+  
 
   // Courses
   COURSES: 'api/courses/',
