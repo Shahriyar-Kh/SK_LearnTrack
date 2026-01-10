@@ -356,3 +356,27 @@ CSRF_TRUSTED_ORIGINS = [
 
 CELERY_TASK_ALWAYS_EAGER = True
 CELERY_TASK_EAGER_PROPAGATES = True
+
+# Add at the bottom of settings.py
+# Custom 404 handler
+def custom_404(request, exception=None):
+    from django.http import JsonResponse
+    return JsonResponse({
+        'error': 'Not Found',
+        'message': 'The requested resource was not found on this server.',
+        'status_code': 404,
+        'available_endpoints': {
+            'root': '/',
+            'admin': '/admin/',
+            'token_obtain': '/api/token/',
+            'token_refresh': '/api/token/refresh/',
+            'auth': '/api/auth/',
+            'courses': '/api/courses/',
+            'notes': '/api/',
+            'roadmaps': '/api/roadmaps/',
+            'analytics': '/api/analytics/',
+        }
+    }, status=404)
+
+# Add this to settings.py
+handler404 = 'sklearntrack_backend.settings.custom_404'

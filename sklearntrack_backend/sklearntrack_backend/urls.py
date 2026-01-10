@@ -7,12 +7,35 @@ from django.conf import settings
 from django.conf.urls.static import static
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 from accounts.views import EmailTokenObtainPairView  # Add this import
+from django.http import JsonResponse  # Add this import
+
+# Add a simple root view
+def api_root(request):
+    return JsonResponse({
+        'message': 'SK LearnTrack API is running!',
+        'endpoints': {
+            'admin': '/admin/',
+            'token_obtain': '/api/token/',
+            'token_refresh': '/api/token/refresh/',
+            'auth': '/api/auth/',
+            'courses': '/api/courses/',
+            'notes': '/api/',
+            'roadmaps': '/api/roadmaps/',
+            'analytics': '/api/analytics/',
+        },
+        'documentation': 'Check API documentation at /api/docs/',
+        'status': 'online'
+    })
 
 urlpatterns = [
+    # Root URL
+    path('', api_root, name='api_root'),
+    
+    # Admin
     path('admin/', admin.site.urls),
+    
     # JWT Auth endpoints
-        # JWT Authentication - Add token endpoint here directly
-    path('api/token/', EmailTokenObtainPairView.as_view(), name='token_obtain_pair'),  # ADD THIS LINE
+    path('api/token/', EmailTokenObtainPairView.as_view(), name='token_obtain_pair'),
     path('api/token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
     
     # App URLs
