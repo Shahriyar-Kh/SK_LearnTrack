@@ -13,8 +13,10 @@ SECRET_KEY = config('SECRET_KEY')
 DEBUG = config('DEBUG', default=False, cast=bool)
 ALLOWED_HOSTS = config(
     'ALLOWED_HOSTS',
-    default='sk-learntrack.onrender.com'
+    default='localhost,127.0.0.1'
 ).split(',')
+
+
 
 # Application Definition
 INSTALLED_APPS = [
@@ -188,8 +190,14 @@ SIMPLE_JWT = {
 }
 
 # CORS Settings - CRITICAL FOR FRONTEND
-CORS_ALLOWED_ORIGINS.append("https://sk-learntrack.vercel.app")
-
+CORS_ALLOWED_ORIGINS = [
+    "https://sk-learntrack.vercel.app",
+    "http://localhost:3000",  # For local development
+]
+# Add Render's hostname to CORS_ALLOWED_ORIGINS
+RENDER_EXTERNAL_HOSTNAME = os.environ.get('RENDER_EXTERNAL_HOSTNAME')
+if RENDER_EXTERNAL_HOSTNAME:
+    CORS_ALLOWED_ORIGINS.append(f"https://{RENDER_EXTERNAL_HOSTNAME}")
 
 CORS_ALLOW_CREDENTIALS = True
 
@@ -201,7 +209,6 @@ CORS_ALLOW_METHODS = [
     'POST',
     'PUT',
 ]
-
 CORS_ALLOW_HEADERS = [
     'accept',
     'accept-encoding',
