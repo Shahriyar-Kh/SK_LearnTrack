@@ -12,20 +12,18 @@ from django.http import JsonResponse  # Add this import
 # Add a simple root view
 def api_root(request):
     return JsonResponse({
-        'message': 'SK LearnTrack API is running!',
-        'endpoints': {
-            'admin': '/admin/',
-            'token_obtain': '/api/token/',
-            'token_refresh': '/api/token/refresh/',
-            'auth': '/api/auth/',
-            'courses': '/api/courses/',
-            'notes': '/api/',
-            'roadmaps': '/api/roadmaps/',
-            'analytics': '/api/analytics/',
-        },
-        'documentation': 'Check API documentation at /api/docs/',
-        'status': 'online'
-    })
+    "message": "SK LearnTrack API is running!",
+    "endpoints": {
+        "admin": "/admin/",
+        "token_obtain": "/api/token/",
+        "token_refresh": "/api/token/refresh/",
+        "auth": "/api/auth/",
+        "courses": "/api/courses/",
+        "notes": "/api/",
+        "roadmaps": "/api/roadmaps/",
+        "analytics": "/api/analytics/",
+    }
+})
 
 urlpatterns = [
     # Root URL

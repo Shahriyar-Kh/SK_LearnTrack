@@ -196,7 +196,8 @@ SIMPLE_JWT = {
 
 CORS_ALLOWED_ORIGINS = [
     "https://sk-learntrack.vercel.app",
-    "https://sk-learntrack-pkw6.onrender.com",  # ADD THIS - Your actual backend URL
+    "https://sk-learntrack-git-main-shahriyar-khans-projects-dbef3e31.vercel.app",
+    "https://sk-learntrack-5n3xxdrwr-shahriyar-khans-projects-dbef3e31.vercel.app",
     "http://localhost:3000",  # For local development
     "http://localhost:5173",  # Vite default port
 ]
@@ -231,6 +232,8 @@ CORS_ALLOW_HEADERS = [
 CSRF_TRUSTED_ORIGINS = [
     "https://sk-learntrack-pkw6.onrender.com",
     "https://sk-learntrack.vercel.app",
+    "https://sk-learntrack-git-main-shahriyar-khans-projects-dbef3e31.vercel.app",
+    "https://sk-learntrack-5n3xxdrwr-shahriyar-khans-projects-dbef3e31.vercel.app",
 ]
 # Email Configuration
 EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
@@ -341,12 +344,17 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 # Security Settings for Production
 if not DEBUG:
     SECURE_SSL_REDIRECT = True
-    SESSION_COOKIE_SECURE = True
-    CSRF_COOKIE_SECURE = True
     SECURE_BROWSER_XSS_FILTER = True
     SECURE_CONTENT_TYPE_NOSNIFF = True
     X_FRAME_OPTIONS = 'DENY'
 
+# Add this condition:
+if not DEBUG:
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
+else:
+    SESSION_COOKIE_SECURE = False
+    CSRF_COOKIE_SECURE = False
 
 # Session settings for Google OAuth
 SESSION_COOKIE_SAMESITE = 'Lax'
