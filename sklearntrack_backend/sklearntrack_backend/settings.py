@@ -79,15 +79,25 @@ TEMPLATES = [
 
 WSGI_APPLICATION = 'sklearntrack_backend.wsgi.application'
 
-# Database Configuration - REPLACE THIS SECTION
-DATABASES = {
-    'default': dj_database_url.config(
-        default=config('DATABASE_URL', default='postgresql://postgres:postgres@localhost:5432/postgres'),
-        conn_max_age=600,
-        conn_health_checks=True,
-    )
-}
 
+# Database Configuration
+if DEBUG:
+    # Use SQLite for local development
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.sqlite3',
+            'NAME': BASE_DIR / 'db.sqlite3',
+        }
+    }
+else:
+    # Use PostgreSQL for production
+    DATABASES = {
+        'default': dj_database_url.config(
+            default=config('DATABASE_URL', default='postgresql://postgres:postgres@localhost:5432/postgres'),
+            conn_max_age=600,
+            conn_health_checks=True,
+        )
+    }
 # Password Validation
 AUTH_PASSWORD_VALIDATORS = [
     {
@@ -400,3 +410,4 @@ handler404 = 'sklearntrack_backend.settings.custom_404'
 # Google OAuth for Drive
 GOOGLE_OAUTH_CLIENT_ID = config('GOOGLE_OAUTH_CLIENT_ID', default='')
 GOOGLE_OAUTH_CLIENT_SECRET = config('GOOGLE_OAUTH_CLIENT_SECRET', default='')
+GOOGLE_OAUTH_REDIRECT_URI = os.environ.get('GOOGLE_OAUTH_REDIRECT_URI', None)

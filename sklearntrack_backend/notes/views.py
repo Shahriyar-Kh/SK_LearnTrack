@@ -14,6 +14,7 @@ from django.http import HttpResponse
 from django.utils import timezone
 from uuid import uuid4
 from .models import AIHistory
+from .google_callback import GoogleOAuthCallbackView
 from .serializers import AIHistorySerializer, AIToolActionSerializer
 
 import os
@@ -249,55 +250,15 @@ class NoteViewSet(viewsets.ModelViewSet):
     
     @action(detail=False, methods=['get'])
     def google_auth_url(self, request):
-        """Get Google OAuth URL"""
+        """Get Google OAuth URL using GoogleAuthService"""
         try:
-            from google_auth_oauthlib.flow import Flow
-            import secrets
-            
-            client_secret_path = os.path.join(
-                settings.BASE_DIR.parent,
-                'client_secret.json'
-            )
-            
-            if not os.path.exists(client_secret_path):
-                return Response({
-                    'success': False,
-                    'error': 'Google Drive not configured. Please add client_secret.json'
-                }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-            
-            random_token = secrets.token_urlsafe(32)
-            state = f"{request.user.id}:{random_token}"
-            
-            request.session['google_auth_state'] = state
-            request.session['google_auth_user_id'] = request.user.id
-            request.session['user_id'] = request.user.id
-            request.session.save()
-            
-            logger.info(f"Generated state for user {request.user.id}: {state}")
-            
-            redirect_uri = 'http://localhost:8000/api/notes/google-callback/'
-            
-            flow = Flow.from_client_secrets_file(
-                client_secret_path,
-                scopes=SCOPES,
-                redirect_uri=redirect_uri
-            )
-            
-            authorization_url, _ = flow.authorization_url(
-                access_type='offline',
-                include_granted_scopes='true',
-                state=state,
-                prompt='consent'
-            )
+            # Use the updated GoogleAuthService
+            auth_url = GoogleAuthService.get_oauth_url(request)
             
             return Response({
                 'success': True,
-                'auth_url': authorization_url,
-                'state': state,
-                'user_id': request.user.id,
-                'session_key': request.session.session_key
+                'auth_url': auth_url,
             })
-            
         except Exception as e:
             logger.error(f"Auth URL generation error: {str(e)}")
             return Response({
