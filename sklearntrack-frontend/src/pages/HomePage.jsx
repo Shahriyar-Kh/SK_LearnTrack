@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { 
   BookOpen, Target, TrendingUp, Users, 
   Brain, FileText, Map, BarChart3, 
-  CloudUpload, Mail, Sparkles, Zap,
+  UploadCloud, Mail, Sparkles, Zap,  // ✅ Correct name
   ArrowRight, CheckCircle, Code
 } from 'lucide-react';
 import { useEffect, useState } from 'react';
@@ -270,12 +270,12 @@ const HomePage = () => {
                   description: 'Personalized email summaries of your daily learning progress',
                   color: 'bg-gradient-to-br from-indigo-500 to-purple-500'
                 },
-                {
-                  icon: CloudUpload,
-                  title: 'Auto-Sync',
-                  description: 'Export notes as PDF and sync automatically with Google Drive',
-                  color: 'bg-gradient-to-br from-pink-500 to-rose-500'
-                }
+              {
+                icon: UploadCloud,  // ✅
+                title: 'Auto-Sync',
+                description: 'Export notes as PDF and sync automatically with Google Drive',
+                color: 'bg-gradient-to-br from-pink-500 to-rose-500'
+              }
               ].map((feature, index) => (
                 <div
                   key={index}
@@ -370,7 +370,7 @@ const HomePage = () => {
                   <span>AI Tools</span>
                 </li>
                 <li className="flex items-center gap-2">
-                  <CloudUpload className="w-4 h-4" />
+                  <UploadCloud className="w-4 h-4" />  // ✅
                   <span>Cloud Export</span>
                 </li>
                 <li className="flex items-center gap-2">
