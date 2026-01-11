@@ -36,15 +36,9 @@ class GoogleDriveService:
     
     def _get_token_path(self):
         """Get secure token storage path for user"""
-        # Store outside of web-accessible directories
-        token_dir = os.path.join(settings.BASE_DIR, 'secure_tokens', 'google_drive')
+        token_dir = os.path.join(settings.MEDIA_ROOT, 'google_tokens')
         os.makedirs(token_dir, exist_ok=True)
-        
-        # Hash user ID with a salt for additional security
-        salt = settings.SECRET_KEY[:8]  # Use part of Django secret key
-        user_hash = hashlib.sha256(f"{salt}{self.user.id}".encode()).hexdigest()[:16]
-        
-        return os.path.join(token_dir, f'token_{user_hash}.pickle')
+        return os.path.join(token_dir, f'token_{self.user.id}.pickle')
     
     def _authenticate(self):
         """Authenticate with Google Drive API"""
