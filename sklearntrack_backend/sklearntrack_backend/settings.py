@@ -396,3 +396,7 @@ def custom_404(request, exception=None):
 
 # Add this to settings.py
 handler404 = 'sklearntrack_backend.settings.custom_404'
+
+# Google OAuth for Drive
+GOOGLE_OAUTH_CLIENT_ID = config('GOOGLE_OAUTH_CLIENT_ID', default='')
+GOOGLE_OAUTH_CLIENT_SECRET = config('GOOGLE_OAUTH_CLIENT_SECRET', default='')

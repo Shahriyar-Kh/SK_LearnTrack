@@ -3,17 +3,19 @@
 
 from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import Request
-from google_auth_oauthlib.flow import InstalledAppFlow, Flow
+from google_auth_oauthlib.flow import Flow
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseUpload
 from googleapiclient.errors import HttpError
 from django.conf import settings
 from django.core.mail import EmailMessage
 from django.utils import timezone
+from django.contrib.auth import get_user_model
 import os
 import pickle
 import logging
 import secrets
+import hashlib
 from io import BytesIO
 from datetime import datetime, timedelta
 
@@ -34,9 +36,15 @@ class GoogleDriveService:
     
     def _get_token_path(self):
         """Get secure token storage path for user"""
-        token_dir = os.path.join(settings.MEDIA_ROOT, 'google_tokens')
+        # Store outside of web-accessible directories
+        token_dir = os.path.join(settings.BASE_DIR, 'secure_tokens', 'google_drive')
         os.makedirs(token_dir, exist_ok=True)
-        return os.path.join(token_dir, f'token_{self.user.id}.pickle')
+        
+        # Hash user ID with a salt for additional security
+        salt = settings.SECRET_KEY[:8]  # Use part of Django secret key
+        user_hash = hashlib.sha256(f"{salt}{self.user.id}".encode()).hexdigest()[:16]
+        
+        return os.path.join(token_dir, f'token_{user_hash}.pickle')
     
     def _authenticate(self):
         """Authenticate with Google Drive API"""
@@ -48,6 +56,9 @@ class GoogleDriveService:
                 with open(token_path, 'rb') as token:
                     self.creds = pickle.load(token)
                 logger.info(f"Loaded credentials for user {self.user.id}")
+            except (pickle.PickleError, EOFError, KeyError) as e:
+                logger.error(f"Corrupted or invalid token file: {e}")
+                self.creds = None
             except Exception as e:
                 logger.error(f"Error loading credentials: {e}")
                 self.creds = None
@@ -69,8 +80,12 @@ class GoogleDriveService:
             raise Exception("Google Drive authentication required. Please reconnect.")
         
         # Build service
-        self.service = build('drive', 'v3', credentials=self.creds)
-        logger.info(f"Drive service built for user {self.user.id}")
+        try:
+            self.service = build('drive', 'v3', credentials=self.creds)
+            logger.info(f"Drive service built for user {self.user.id}")
+        except Exception as e:
+            logger.error(f"Error building Drive service: {e}")
+            raise
     
     def is_connected(self):
         """Check if user has valid Drive connection"""
@@ -84,6 +99,16 @@ class GoogleDriveService:
             return creds and creds.valid
         except Exception as e:
             logger.error(f"Error checking connection: {e}")
+            return False
+    
+    def test_connection(self):
+        """Test if the Google Drive connection is working"""
+        try:
+            # Simple API call to test connection
+            self.service.about().get(fields='user').execute()
+            return True
+        except Exception as e:
+            logger.error(f"Connection test failed: {e}")
             return False
     
     def get_or_create_folder(self):
@@ -164,6 +189,7 @@ class GoogleDriveService:
                         'id': file['id'],
                         'webViewLink': file.get('webViewLink'),
                         'webContentLink': file.get('webContentLink'),
+                        'modifiedTime': file.get('modifiedTime'),
                         'success': True,
                         'updated': True
                     }
@@ -184,7 +210,7 @@ class GoogleDriveService:
             file = self.service.files().create(
                 body=file_metadata,
                 media_body=media,
-                fields='id, webViewLink, webContentLink'
+                fields='id, webViewLink, webContentLink, createdTime'
             ).execute()
             
             # Set file permissions to accessible by link
@@ -199,6 +225,7 @@ class GoogleDriveService:
                 'id': file['id'],
                 'webViewLink': file.get('webViewLink'),
                 'webContentLink': file.get('webContentLink'),
+                'createdTime': file.get('createdTime'),
                 'success': True,
                 'updated': False
             }
@@ -227,41 +254,111 @@ class GoogleDriveService:
         except HttpError as e:
             logger.error(f"Error deleting file: {e}")
             return False
+    
+    def list_user_files(self):
+        """List all PDF files in the user's folder"""
+        try:
+            folder_id = self.get_or_create_folder()
+            query = f"'{folder_id}' in parents and mimeType='application/pdf' and trashed=false"
+            
+            results = self.service.files().list(
+                q=query,
+                spaces='drive',
+                fields='files(id, name, createdTime, modifiedTime, size, webViewLink)',
+                orderBy='modifiedTime desc'
+            ).execute()
+            
+            return results.get('files', [])
+        except Exception as e:
+            logger.error(f"Error listing files: {e}")
+            return []
+    
+    def get_file_info(self, file_id):
+        """Get detailed information about a specific file"""
+        try:
+            file = self.service.files().get(
+                fileId=file_id,
+                fields='id, name, mimeType, createdTime, modifiedTime, size, webViewLink, webContentLink, owners'
+            ).execute()
+            return file
+        except HttpError as e:
+            logger.error(f"Error getting file info: {e}")
+            return None
 
 
 class GoogleAuthService:
     """Handle Google OAuth authentication"""
     
     @staticmethod
+    def validate_configuration():
+        """Validate that all required settings are configured"""
+        required_settings = [
+            'GOOGLE_OAUTH_CLIENT_ID',
+            'GOOGLE_OAUTH_CLIENT_SECRET',
+        ]
+        
+        missing = []
+        for setting in required_settings:
+            if not getattr(settings, setting, None):
+                missing.append(setting)
+        
+        if missing:
+            raise Exception(f"Missing required Google Drive settings: {', '.join(missing)}")
+        
+        return True
+    
+    @staticmethod
+    def _get_redirect_uri():
+        """Get the appropriate redirect URI based on environment"""
+        # Check if a custom redirect URI is set in settings
+        if hasattr(settings, 'GOOGLE_OAUTH_REDIRECT_URI') and settings.GOOGLE_OAUTH_REDIRECT_URI:
+            return settings.GOOGLE_OAUTH_REDIRECT_URI
+        
+        # Fallback to environment-based defaults
+        if settings.DEBUG:
+            return 'http://localhost:8000/api/notes/google-callback/'
+        else:
+            return 'https://sk-learntrack-pkw6.onrender.com/api/notes/google-callback/'
+    
+    @staticmethod
+    def _get_client_config():
+        """Get OAuth client configuration from settings"""
+        GoogleAuthService.validate_configuration()
+        
+        return {
+            "web": {
+                "client_id": settings.GOOGLE_OAUTH_CLIENT_ID,
+                "client_secret": settings.GOOGLE_OAUTH_CLIENT_SECRET,
+                "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+                "token_uri": "https://oauth2.googleapis.com/token",
+                "redirect_uris": [GoogleAuthService._get_redirect_uri()]
+            }
+        }
+    
+    @staticmethod
     def get_oauth_url(request):
-        """Generate Google OAuth URL"""
+        """Generate Google OAuth URL using environment variables"""
         try:
-            client_secret_path = os.path.join(
-                settings.BASE_DIR.parent,
-                'client_secret.json'
-            )
+            # Get client configuration
+            client_config = GoogleAuthService._get_client_config()
             
-            if not os.path.exists(client_secret_path):
-                raise Exception("Google Drive not configured. Please add client_secret.json")
-            
-            # Generate secure state token WITH user_id embedded
+            # Generate secure state token
             random_token = secrets.token_urlsafe(32)
-            state = f"{request.user.id}:{random_token}"  # FIX: Use colon consistently
+            state = f"{request.user.id}:{random_token}"
             
             # Store in session
             request.session['google_auth_state'] = state
             request.session['google_auth_user_id'] = request.user.id
             request.session.modified = True
-            
-            # Force session save
             request.session.save()
             
-            logger.info(f"Generated state for user {request.user.id}: {state}")
+            logger.info(f"Generated state for user {request.user.id}: {state[:10]}...")
             
-            flow = Flow.from_client_secrets_file(
-                client_secret_path,
+            # Create flow
+            flow = Flow.from_client_config(
+                client_config,
                 scopes=SCOPES,
-                redirect_uri=request.build_absolute_uri('/api/notes/google-callback/')
+                redirect_uri=GoogleAuthService._get_redirect_uri()
             )
             
             authorization_url, _ = flow.authorization_url(
@@ -287,37 +384,36 @@ class GoogleAuthService:
             user_id = request.session.get('google_auth_user_id')
             
             if not state or state != session_state or not user_id:
+                logger.error(f"State mismatch or missing session data. State: {state}, Session state: {session_state}, User ID: {user_id}")
                 raise Exception("Invalid session or state mismatch")
             
-            from django.contrib.auth import get_user_model
-            User = get_user_model()
-            
             # Get user
+            User = get_user_model()
             try:
                 user = User.objects.get(id=user_id)
             except User.DoesNotExist:
                 raise Exception("User not found")
             
-            # Exchange code for credentials
-            client_secret_path = os.path.join(
-                settings.BASE_DIR.parent,
-                'client_secret.json'
-            )
+            # Get client configuration
+            client_config = GoogleAuthService._get_client_config()
             
-            flow = Flow.from_client_secrets_file(
-                client_secret_path,
+            # Create flow and exchange code for credentials
+            flow = Flow.from_client_config(
+                client_config,
                 scopes=SCOPES,
                 state=state,
-                redirect_uri=request.build_absolute_uri('/api/notes/google-callback/')
+                redirect_uri=GoogleAuthService._get_redirect_uri()
             )
             
             flow.fetch_token(authorization_response=request.build_absolute_uri())
             credentials = flow.credentials
             
-            # Save credentials
-            token_dir = os.path.join(settings.MEDIA_ROOT, 'google_tokens')
-            os.makedirs(token_dir, exist_ok=True)
-            token_path = os.path.join(token_dir, f'token_{user.id}.pickle')
+            # Save credentials using GoogleDriveService's secure method
+            drive_service = GoogleDriveService(user)
+            token_path = drive_service._get_token_path()
+            
+            # Ensure directory exists
+            os.makedirs(os.path.dirname(token_path), exist_ok=True)
             
             with open(token_path, 'wb') as token:
                 pickle.dump(credentials, token)
@@ -332,3 +428,36 @@ class GoogleAuthService:
         except Exception as e:
             logger.error(f"OAuth callback error: {e}")
             raise
+    
+    @staticmethod
+    def disconnect(user):
+        """Disconnect Google Drive for a user"""
+        try:
+            drive_service = GoogleDriveService(user)
+            token_path = drive_service._get_token_path()
+            
+            if os.path.exists(token_path):
+                os.remove(token_path)
+                logger.info(f"Disconnected Google Drive for user {user.id}")
+                return True
+            else:
+                logger.warning(f"No token found for user {user.id}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"Error disconnecting Google Drive: {e}")
+            return False
+
+
+# Utility function to check if Google Drive is properly configured
+def is_google_drive_configured():
+    """Check if Google Drive is properly configured in settings"""
+    try:
+        return all([
+            hasattr(settings, 'GOOGLE_OAUTH_CLIENT_ID'),
+            hasattr(settings, 'GOOGLE_OAUTH_CLIENT_SECRET'),
+            settings.GOOGLE_OAUTH_CLIENT_ID,
+            settings.GOOGLE_OAUTH_CLIENT_SECRET
+        ])
+    except:
+        return False

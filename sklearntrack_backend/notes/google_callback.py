@@ -1,4 +1,4 @@
-# FILE: notes/views/google_callback.py - Fix with OAUTHLIB_INSECURE_TRANSPORT
+# FILE: notes/views/google_callback.py - FIXED VERSION
 # ============================================================================
 
 from django.http import HttpResponse
@@ -9,10 +9,6 @@ import os
 import pickle
 import logging
 from google_auth_oauthlib.flow import Flow
-
-# ADD THIS: Allow HTTP for local development
-import os
-os.environ['OAUTHLIB_INSECURE_TRANSPORT'] = '1'  # Allow HTTP for localhost
 
 logger = logging.getLogger(__name__)
 SCOPES = ['https://www.googleapis.com/auth/drive.file']
@@ -67,26 +63,35 @@ class GoogleOAuthCallbackView(View):
                 logger.error(f"User with id {user_id} not found")
                 return HttpResponse("<h1>User not found</h1>", status=404)
             
-            # Exchange code for credentials
-            client_secret_path = os.path.join(
-                settings.BASE_DIR.parent,
-                'client_secret.json'
-            )
+            # Get Google OAuth credentials from settings
+            client_id = settings.GOOGLE_OAUTH_CLIENT_ID
+            client_secret = settings.GOOGLE_OAUTH_CLIENT_SECRET
             
-            if not os.path.exists(client_secret_path):
-                logger.error(f"client_secret.json not found at {client_secret_path}")
-                return HttpResponse("<h1>Server configuration error</h1>", status=500)
+            if not client_id or not client_secret:
+                logger.error("Google OAuth credentials not configured in settings")
+                return HttpResponse("<h1>Server configuration error: Google OAuth not configured</h1>", status=500)
             
             # Create redirect URI
-            redirect_uri = 'http://localhost:8000/api/notes/google-callback/'
+            if settings.DEBUG:
+                redirect_uri = 'http://localhost:8000/api/notes/google-callback/'
+                os.environ['OAUTHLIB_INSECURE_TRANSPORT'] = '1'  # Allow HTTP for local development
+            else:
+                redirect_uri = 'https://sk-learntrack-pkw6.onrender.com/api/notes/google-callback/'
             
             try:
-                # Set the environment variable for insecure transport
-                # This is safe for local development only
-                os.environ['OAUTHLIB_INSECURE_TRANSPORT'] = '1'
+                # Create OAuth flow with environment variables
+                client_config = {
+                    "web": {
+                        "client_id": client_id,
+                        "client_secret": client_secret,
+                        "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+                        "token_uri": "https://oauth2.googleapis.com/token",
+                        "redirect_uris": [redirect_uri]
+                    }
+                }
                 
-                flow = Flow.from_client_secrets_file(
-                    client_secret_path,
+                flow = Flow.from_client_config(
+                    client_config,
                     scopes=SCOPES,
                     redirect_uri=redirect_uri
                 )
