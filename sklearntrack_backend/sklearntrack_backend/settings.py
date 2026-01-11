@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 from datetime import timedelta
 from decouple import config
+import dj_database_url  # ADD THIS LINE
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -78,16 +79,13 @@ TEMPLATES = [
 
 WSGI_APPLICATION = 'sklearntrack_backend.wsgi.application'
 
-# Database Configuration
+# Database Configuration - REPLACE THIS SECTION
 DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.postgresql',
-        'NAME': config('DB_NAME', default='postgres'),
-        'USER': config('DB_USER', default='postgres'),
-        'PASSWORD': config('DB_PASSWORD', default='postgres'),
-        'HOST': config('DB_HOST', default='localhost'),
-        'PORT': config('DB_PORT', default='5432'),
-    }
+    'default': dj_database_url.config(
+        default=config('DATABASE_URL', default='postgresql://postgres:postgres@localhost:5432/postgres'),
+        conn_max_age=600,
+        conn_health_checks=True,
+    )
 }
 
 # Password Validation
@@ -348,7 +346,18 @@ if not DEBUG:
     SECURE_CONTENT_TYPE_NOSNIFF = True
     X_FRAME_OPTIONS = 'DENY'
 
-# Add this condition:
+# Session settings
+SESSION_COOKIE_SAMESITE = 'Lax'
+SESSION_COOKIE_HTTPONLY = True
+SESSION_COOKIE_NAME = 'sklearntrack_sessionid'
+SESSION_ENGINE = 'django.contrib.sessions.backends.db'
+SESSION_COOKIE_AGE = 1209600
+SESSION_SAVE_EVERY_REQUEST = True
+SESSION_EXPIRE_AT_BROWSER_CLOSE = False
+
+CSRF_COOKIE_SAMESITE = 'Lax'
+
+# Only set secure in production
 if not DEBUG:
     SESSION_COOKIE_SECURE = True
     CSRF_COOKIE_SECURE = True
@@ -356,22 +365,13 @@ else:
     SESSION_COOKIE_SECURE = False
     CSRF_COOKIE_SECURE = False
 
-# Session settings for Google OAuth
-SESSION_COOKIE_SAMESITE = 'Lax'
-SESSION_COOKIE_SECURE = True  # Set to True in production with HTTPS
-SESSION_COOKIE_HTTPONLY = True
-SESSION_COOKIE_NAME = 'sklearntrack_sessionid'
-SESSION_ENGINE = 'django.contrib.sessions.backends.db'
-SESSION_COOKIE_AGE = 1209600  # 2 weeks in seconds
-SESSION_SAVE_EVERY_REQUEST = True  # IMPORTANT
-SESSION_EXPIRE_AT_BROWSER_CLOSE = False
-
-# Allow session to be passed in iframes/popups
-CSRF_COOKIE_SAMESITE = 'Lax'  # Same as SESSION_COOKIE_SAMESITE
-CSRF_COOKIE_SECURE = True  # Match SESSION_COOKIE_SECURE
-
-CELERY_TASK_ALWAYS_EAGER = True
-CELERY_TASK_EAGER_PROPAGATES = True
+# Should be:
+if DEBUG:
+    CELERY_TASK_ALWAYS_EAGER = True
+    CELERY_TASK_EAGER_PROPAGATES = True
+else:
+    CELERY_TASK_ALWAYS_EAGER = False
+    CELERY_TASK_EAGER_PROPAGATES = False
 
 # Add at the bottom of settings.py
 # Custom 404 handler
