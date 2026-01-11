@@ -1,11 +1,13 @@
-# FILE: notes/daily_report_service.py
+# FILE: daily_report_service.py
 # ============================================================================
 
 from django.utils import timezone
 from django.core.mail import EmailMultiAlternatives
-
 from django.conf import settings
+import logging
 from .models import Note, ChapterTopic
+
+logger = logging.getLogger(__name__)
 
 
 class DailyNotesReportService:
@@ -56,6 +58,20 @@ class DailyNotesReportService:
     def send_daily_report_email(user, report_data):
         """Send daily report via email"""
         try:
+            # Create notes list HTML
+            notes_html = ""
+            if report_data['notes_list']:
+                notes_items = ''.join([
+                    f'<li><strong>{note.title}</strong> ({note.chapters.count()} chapters, {note.status})</li>' 
+                    for note in report_data['notes_list']
+                ])
+                notes_html = f"""
+                <h3>📝 Notes Worked On Today</h3>
+                <ul>
+                    {notes_items}
+                </ul>
+                """
+            
             # Create HTML email content
             html_content = f"""
             <!DOCTYPE html>
@@ -99,12 +115,7 @@ class DailyNotesReportService:
                         </div>
                     </div>
                     
-                    {report_data['notes_list'] and f'''
-                    <h3>📝 Notes Worked On Today</h3>
-                    <ul>
-                        {''.join([f'<li><strong>{note.title}</strong> ({note.chapters.count()} chapters, {note.status})</li>' for note in report_data['notes_list']])}
-                    </ul>
-                    '''}
+                    {notes_html}
                     
                     <p>Keep up the great work! Your consistency is key to mastering new concepts.</p>
                     
@@ -129,9 +140,15 @@ class DailyNotesReportService:
             • Notes Updated: {report_data['notes_updated']}
             • Topics Added: {report_data['topics_created']}
             • Estimated Study Time: {report_data['study_time_estimate']} minutes
+            """
             
-            Notes worked on today:
-            {''.join([f'  - {note.title} ({note.chapters.count()} chapters, {note.status})' + chr(10) for note in report_data['notes_list']])}
+            # Add notes list to text content
+            if report_data['notes_list']:
+                text_content += "\n\nNotes worked on today:\n"
+                for note in report_data['notes_list']:
+                    text_content += f"  - {note.title} ({note.chapters.count()} chapters, {note.status})\n"
+            
+            text_content += """
             
             Keep up the great work! Your consistency is key to mastering new concepts.
             
@@ -147,14 +164,19 @@ class DailyNotesReportService:
                 from_email=settings.DEFAULT_FROM_EMAIL,
                 to=[user.email],
             )
-
             email.attach_alternative(html_content, "text/html")
-            email.send(fail_silently=False)
-
             
+            # Test if email settings work
+            logger.info(f"Attempting to send daily report email to {user.email}")
+            
+            email.send(fail_silently=False)
+            
+            logger.info(f"Daily report email sent successfully to {user.email}")
             return True
             
         except Exception as e:
             import traceback
-            print(f"Email sending error: {traceback.format_exc()}")
+            error_msg = f"Email sending error: {str(e)}\n{traceback.format_exc()}"
+            logger.error(error_msg)
+            print(error_msg)  # Also print to console for immediate visibility
             return False
