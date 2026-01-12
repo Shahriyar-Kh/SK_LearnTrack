@@ -1,8 +1,8 @@
-# FILE: daily_report_service.py
+# FILE: daily_report_service.py - ENHANCED VERSION
 # ============================================================================
 
 from django.utils import timezone
-from django.core.mail import EmailMultiAlternatives
+from django.core.mail import EmailMultiAlternatives, get_connection
 from django.conf import settings
 import logging
 from .models import Note, ChapterTopic
@@ -56,8 +56,23 @@ class DailyNotesReportService:
     
     @staticmethod
     def send_daily_report_email(user, report_data):
-        """Send daily report via email"""
+        """Send daily report via email with enhanced error handling"""
         try:
+            # Validate email settings first
+            if not hasattr(settings, 'EMAIL_HOST_USER') or not settings.EMAIL_HOST_USER:
+                logger.error("Email configuration missing: EMAIL_HOST_USER not set")
+                return False
+                
+            if not hasattr(settings, 'DEFAULT_FROM_EMAIL') or not settings.DEFAULT_FROM_EMAIL:
+                logger.error("Email configuration missing: DEFAULT_FROM_EMAIL not set")
+                return False
+                
+            if not user.email:
+                logger.error(f"User {user.username} has no email address configured")
+                return False
+            
+            logger.info(f"Attempting to send daily report email to {user.email}")
+            
             # Create notes list HTML
             notes_html = ""
             if report_data['notes_list']:
@@ -128,7 +143,7 @@ class DailyNotesReportService:
             </html>
             """
             
-            # Plain text version for email clients that don't support HTML
+            # Plain text version
             text_content = f"""
             Daily Learning Report - {report_data['date']}
             
@@ -157,18 +172,28 @@ class DailyNotesReportService:
             You can adjust email preferences in your account settings.
             """
             
+            # Test email connection
+            try:
+                connection = get_connection()
+                connection.open()
+                logger.info(f"Email connection successful: {settings.EMAIL_HOST}:{settings.EMAIL_PORT}")
+                connection.close()
+            except Exception as conn_error:
+                logger.error(f"Email connection failed: {str(conn_error)}")
+                return False
+            
             # Send email
             email = EmailMultiAlternatives(
                 subject=f'📚 Your Daily Learning Report - {report_data["date"]}',
-                body=text_content,  # plain text
+                body=text_content,
                 from_email=settings.DEFAULT_FROM_EMAIL,
                 to=[user.email],
+                reply_to=[settings.DEFAULT_FROM_EMAIL],
+                connection=get_connection()
             )
             email.attach_alternative(html_content, "text/html")
             
-            # Test if email settings work
-            logger.info(f"Attempting to send daily report email to {user.email}")
-            
+            # Send with timeout
             email.send(fail_silently=False)
             
             logger.info(f"Daily report email sent successfully to {user.email}")
@@ -176,7 +201,7 @@ class DailyNotesReportService:
             
         except Exception as e:
             import traceback
-            error_msg = f"Email sending error: {str(e)}\n{traceback.format_exc()}"
+            error_msg = f"Email sending error for user {user.username}: {str(e)}\n{traceback.format_exc()}"
             logger.error(error_msg)
-            print(error_msg)  # Also print to console for immediate visibility
+            print(f"[EMAIL ERROR] {error_msg}")  # Console output
             return False
