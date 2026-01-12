@@ -56,105 +56,83 @@ class DailyNotesReportService:
     
     @staticmethod
     def _create_email_content(user, report_data):
-        """Create HTML and text content for email"""
-        # Create notes list HTML
-        notes_html = ""
+        """Create HTML and text content optimized to avoid spam"""
+        
+        # Create simple notes list
+        notes_list_text = ""
         if report_data['notes_list']:
-            notes_items = ''.join([
-                f'<li><strong>{note.title}</strong> ({note.chapters.count()} chapters, {note.status})</li>' 
-                for note in report_data['notes_list']
-            ])
-            notes_html = f"""
-            <h3>📝 Notes Worked On Today</h3>
-            <ul>
-                {notes_items}
-            </ul>
-            """
-        
-        # Create HTML email content
-        html_content = f"""
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <style>
-                body {{ font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px; }}
-                .header {{ background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 30px; text-align: center; border-radius: 10px 10px 0 0; }}
-                .content {{ background: #f9f9f9; padding: 30px; border-radius: 0 0 10px 10px; }}
-                .stats {{ display: grid; grid-template-columns: repeat(2, 1fr); gap: 15px; margin: 20px 0; }}
-                .stat-box {{ background: white; padding: 15px; border-radius: 8px; text-align: center; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }}
-                .stat-number {{ font-size: 24px; font-weight: bold; margin: 10px 0; }}
-                .footer {{ margin-top: 30px; padding-top: 20px; border-top: 1px solid #eee; text-align: center; color: #666; font-size: 12px; }}
-            </style>
-        </head>
-        <body>
-            <div class="header">
-                <h1>📚 Daily Learning Report</h1>
-                <p>{report_data['date']}</p>
-            </div>
-            <div class="content">
-                <h2>Hello {user.first_name or user.username}!</h2>
-                <p>Here's your learning activity summary for today:</p>
-                
-                <div class="stats">
-                    <div class="stat-box">
-                        <div>Notes Created</div>
-                        <div class="stat-number" style="color: #667eea;">{report_data['notes_created']}</div>
-                    </div>
-                    <div class="stat-box">
-                        <div>Notes Updated</div>
-                        <div class="stat-number" style="color: #10b981;">{report_data['notes_updated']}</div>
-                    </div>
-                    <div class="stat-box">
-                        <div>Topics Added</div>
-                        <div class="stat-number" style="color: #8b5cf6;">{report_data['topics_created']}</div>
-                    </div>
-                    <div class="stat-box">
-                        <div>Study Time</div>
-                        <div class="stat-number" style="color: #f59e0b;">{report_data['study_time_estimate']} min</div>
-                    </div>
-                </div>
-                
-                {notes_html}
-                
-                <p>Keep up the great work! Your consistency is key to mastering new concepts.</p>
-                
-                <div class="footer">
-                    <p>This is an automated report from SK-LearnTrack.</p>
-                    <p>You can adjust email preferences in your account settings.</p>
-                </div>
-            </div>
-        </body>
-        </html>
-        """
-        
-        # Plain text version
-        text_content = f"""
-        Daily Learning Report - {report_data['date']}
-        
-        Hello {user.first_name or user.username}!
-        
-        Here's your learning activity summary for today:
-        
-        • Notes Created: {report_data['notes_created']}
-        • Notes Updated: {report_data['notes_updated']}
-        • Topics Added: {report_data['topics_created']}
-        • Estimated Study Time: {report_data['study_time_estimate']} minutes
-        """
-        
-        # Add notes list to text content
-        if report_data['notes_list']:
-            text_content += "\n\nNotes worked on today:\n"
+            notes_list_text = "\n\nYou worked on these notes today:\n"
             for note in report_data['notes_list']:
-                text_content += f"  - {note.title} ({note.chapters.count()} chapters, {note.status})\n"
+                notes_list_text += f"- {note.title} ({note.chapters.count()} chapters, {note.status})\n"
         
-        text_content += """
-        
-        Keep up the great work! Your consistency is key to mastering new concepts.
-        
-        ---
-        This is an automated report from SK-LearnTrack.
-        You can adjust email preferences in your account settings.
+        # MINIMAL HTML - looks like a receipt/notification
+        html_content = f"""
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+            <div style="text-align: center; margin-bottom: 30px;">
+                <h2 style="color: #333; margin-bottom: 5px;">SK LearnTrack</h2>
+                <p style="color: #666; margin: 0;">Daily Learning Activity Report</p>
+                <p style="color: #999; font-size: 14px;">{report_data['date']}</p>
+            </div>
+            
+            <div style="background: #f8f9fa; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
+                <p style="margin: 0 0 10px;">Hello <strong>{user.first_name or user.username}</strong>,</p>
+                <p style="margin: 0;">Here's a summary of your learning activity:</p>
+            </div>
+            
+            <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin: 20px 0;">
+                <div style="text-align: center; padding: 15px; background: white; border: 1px solid #ddd; border-radius: 6px;">
+                    <div style="font-size: 24px; font-weight: bold; color: #007bff;">{report_data['notes_created']}</div>
+                    <div style="font-size: 12px; color: #666;">Notes Created</div>
+                </div>
+                <div style="text-align: center; padding: 15px; background: white; border: 1px solid #ddd; border-radius: 6px;">
+                    <div style="font-size: 24px; font-weight: bold; color: #28a745;">{report_data['notes_updated']}</div>
+                    <div style="font-size: 12px; color: #666;">Notes Updated</div>
+                </div>
+                <div style="text-align: center; padding: 15px; background: white; border: 1px solid #ddd; border-radius: 6px;">
+                    <div style="font-size: 24px; font-weight: bold; color: #6f42c1;">{report_data['topics_created']}</div>
+                    <div style="font-size: 12px; color: #666;">Topics Added</div>
+                </div>
+                <div style="text-align: center; padding: 15px; background: white; border: 1px solid #ddd; border-radius: 6px;">
+                    <div style="font-size: 24px; font-weight: bold; color: #fd7e14;">{report_data['study_time_estimate']} min</div>
+                    <div style="font-size: 12px; color: #666;">Study Time</div>
+                </div>
+            </div>
+            
+            <div style="margin-top: 30px; padding-top: 20px; border-top: 1px solid #eee; font-size: 12px; color: #666; text-align: center;">
+                <p style="margin: 0 0 10px;">
+                    This is an automated learning activity report.<br>
+                    Manage your email preferences in your account settings.
+                </p>
+                <p style="margin: 0; font-size: 11px;">
+                    <a href="https://sk-learntrack.vercel.app/settings" style="color: #007bff; text-decoration: none;">Settings</a> | 
+                    <a href="https://sk-learntrack.vercel.app/unsubscribe" style="color: #666; text-decoration: none;">Unsubscribe</a>
+                </p>
+            </div>
+        </div>
         """
+        
+        # PLAIN TEXT VERSION (very important for spam filters)
+        text_content = f"""SK LearnTrack - Daily Learning Activity Report
+    {report_data['date']}
+
+    Hello {user.first_name or user.username},
+
+    Here's a summary of your learning activity today:
+
+    • Notes Created: {report_data['notes_created']}
+    • Notes Updated: {report_data['notes_updated']}
+    • Topics Added: {report_data['topics_created']}
+    • Study Time: {report_data['study_time_estimate']} minutes
+    {notes_list_text}
+
+    This is an automated learning activity report.
+
+    Manage your email preferences: https://sk-learntrack.vercel.app/settings
+    Unsubscribe: https://sk-learntrack.vercel.app/unsubscribe
+
+    ---
+    SK LearnTrack
+    """
         
         return html_content, text_content
     
