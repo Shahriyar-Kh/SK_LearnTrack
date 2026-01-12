@@ -244,27 +244,33 @@ CSRF_TRUSTED_ORIGINS = [
     "https://sk-learntrack-5n3xxdrwr-shahriyar-khans-projects-dbef3e31.vercel.app",
 ]
 # Email Configuration
-# Option 1: SendGrid SMTP (Recommended)
+# SendGrid API Key (preferred method)
+SENDGRID_API_KEY = config('SENDGRID_API_KEY', default='')
+
+# SMTP Settings (fallback)
 EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
-EMAIL_HOST = 'smtp.sendgrid.net'
-EMAIL_PORT = 587
-EMAIL_USE_TLS = True
-EMAIL_HOST_USER = 'apikey'  # Literally the word 'apikey'
-EMAIL_HOST_PASSWORD = config('SENDGRID_API_KEY', default='')  # Your SendGrid API Key
+EMAIL_HOST = config('EMAIL_HOST', default='smtp.sendgrid.net')
+EMAIL_PORT = config('EMAIL_PORT', default=587, cast=int)
+EMAIL_USE_TLS = config('EMAIL_USE_TLS', default=True, cast=bool)
+EMAIL_HOST_USER = config('EMAIL_HOST_USER', default='apikey')
+EMAIL_HOST_PASSWORD = config('SENDGRID_API_KEY', default='')  # Same as API key for SMTP
 DEFAULT_FROM_EMAIL = config('DEFAULT_FROM_EMAIL', default='noreply@sklearntrack.com')
 
 # Email timeout settings (prevents hanging)
-EMAIL_TIMEOUT = 15  # 15 seconds timeout
+EMAIL_TIMEOUT = 10  # 10 seconds timeout
 
-# Optional: For debugging in development
+# Development: Use console backend
 if DEBUG:
     EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
-    print("Development: Using console email backend")
+    print("✅ Development: Using console email backend")
 else:
-    # Production: Use SendGrid
-    EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
+    # Production: Check if SendGrid is configured
+    if SENDGRID_API_KEY and SENDGRID_API_KEY.strip():
+        print("✅ Production: SendGrid API configured")
+    else:
+        print("⚠️ Production: SendGrid API key not found, email may fail")
 
-
+        
 # Celery Configuration
 CELERY_BROKER_URL = config('CELERY_BROKER_URL', default='redis://localhost:6379/0')
 CELERY_RESULT_BACKEND = config('CELERY_RESULT_BACKEND', default='redis://localhost:6379/0')

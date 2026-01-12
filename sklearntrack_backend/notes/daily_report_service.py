@@ -1,4 +1,4 @@
-# FILE: daily_report_service.py - UPDATED WITH SENDGRID INTEGRATION
+# FILE: daily_report_service.py - FIXED SENDGRID INTEGRATION
 # ============================================================================
 
 from django.utils import timezone
@@ -6,7 +6,6 @@ from django.core.mail import EmailMultiAlternatives, get_connection
 from django.conf import settings
 import logging
 from .models import Note, ChapterTopic
-from .sendgrid_service import SendGridEmailService  # Import SendGrid service
 
 logger = logging.getLogger(__name__)
 
@@ -161,7 +160,7 @@ class DailyNotesReportService:
     
     @staticmethod
     def send_daily_report_email(user, report_data):
-        """Send daily report via email with SendGrid priority"""
+        """Send daily report via email with SendGrid API priority"""
         try:
             # Validate user has email
             if not user.email:
@@ -170,18 +169,80 @@ class DailyNotesReportService:
             
             logger.info(f"Attempting to send daily report email to {user.email}")
             
-            # Check if we should use SendGrid (preferred method)
-            use_sendgrid = hasattr(settings, 'SENDGRID_API_KEY') and settings.SENDGRID_API_KEY
+            # Check if SendGrid API key is available
+            sendgrid_api_key = getattr(settings, 'SENDGRID_API_KEY', None)
             
-            if use_sendgrid:
-                logger.info("Using SendGrid for email delivery")
-                return SendGridEmailService.send_daily_report(user, report_data)
+            if sendgrid_api_key and sendgrid_api_key.strip():
+                logger.info("Using SendGrid API for email delivery")
+                return DailyNotesReportService._send_via_sendgrid_api(user, report_data, sendgrid_api_key)
+            else:
+                logger.warning("SendGrid API key not configured, falling back to SMTP")
+                return DailyNotesReportService._send_via_smtp(user, report_data)
             
-            # Fallback to SMTP if SendGrid is not available
-            logger.info("Using SMTP for email delivery")
+        except Exception as e:
+            import traceback
+            error_msg = f"Email sending error for user {user.username}: {str(e)}\n{traceback.format_exc()}"
+            logger.error(error_msg)
+            print(f"[EMAIL ERROR] {error_msg}")
+            return False
+    
+    @staticmethod
+    def _send_via_sendgrid_api(user, report_data, api_key):
+        """Send email using SendGrid API directly"""
+        try:
+            import sendgrid
+            from sendgrid.helpers.mail import Mail, Email, To, Content
             
+            # Create email content
+            html_content, text_content = DailyNotesReportService._create_email_content(user, report_data)
+            
+            # Initialize SendGrid client
+            sg = sendgrid.SendGridAPIClient(api_key=api_key)
+            
+            # Create mail object
+            from_email = Email(settings.DEFAULT_FROM_EMAIL)
+            to_email = To(user.email)
+            subject = f'📚 Your Daily Learning Report - {report_data["date"]}'
+            
+            mail = Mail(
+                from_email=from_email,
+                to_emails=to_email,
+                subject=subject,
+                plain_text_content=Content("text/plain", text_content),
+                html_content=Content("text/html", html_content)
+            )
+            
+            # Send email with timeout
+            import socket
+            original_timeout = socket.getdefaulttimeout()
+            socket.setdefaulttimeout(10)  # 10 second timeout
+            
+            try:
+                response = sg.send(mail)
+                logger.info(f"✅ SendGrid API response: {response.status_code}")
+                
+                if response.status_code in [200, 201, 202]:
+                    logger.info(f"✅ Email sent successfully via SendGrid API to {user.email}")
+                    return True
+                else:
+                    logger.error(f"❌ SendGrid API error: {response.status_code} - {response.body}")
+                    return False
+            finally:
+                socket.setdefaulttimeout(original_timeout)
+            
+        except ImportError:
+            logger.error("SendGrid library not installed. Run: pip install sendgrid")
+            return False
+        except Exception as e:
+            logger.error(f"SendGrid API error: {str(e)}")
+            return False
+    
+    @staticmethod
+    def _send_via_smtp(user, report_data):
+        """Fallback to SMTP if SendGrid API is not available"""
+        try:
             # Validate SMTP settings
-            required_settings = ['EMAIL_HOST_USER', 'DEFAULT_FROM_EMAIL', 'EMAIL_HOST', 'EMAIL_PORT']
+            required_settings = ['EMAIL_HOST', 'EMAIL_PORT', 'DEFAULT_FROM_EMAIL']
             for setting in required_settings:
                 if not hasattr(settings, setting) or not getattr(settings, setting):
                     logger.error(f"SMTP configuration missing: {setting}")
@@ -190,9 +251,9 @@ class DailyNotesReportService:
             # Create email content
             html_content, text_content = DailyNotesReportService._create_email_content(user, report_data)
             
-            # Test SMTP connection
+            # Test SMTP connection with shorter timeout
             try:
-                connection = get_connection(timeout=10)
+                connection = get_connection(timeout=5)
                 connection.open()
                 logger.info(f"SMTP connection successful: {settings.EMAIL_HOST}:{settings.EMAIL_PORT}")
                 connection.close()
@@ -200,14 +261,14 @@ class DailyNotesReportService:
                 logger.error(f"SMTP connection failed: {str(conn_error)}")
                 return False
             
-            # Create and send email via SMTP
+            # Create and send email via SMTP with timeout
             email = EmailMultiAlternatives(
                 subject=f'📚 Your Daily Learning Report - {report_data["date"]}',
                 body=text_content,
                 from_email=settings.DEFAULT_FROM_EMAIL,
                 to=[user.email],
                 reply_to=[settings.DEFAULT_FROM_EMAIL],
-                connection=get_connection(timeout=15)
+                connection=get_connection(timeout=10)
             )
             email.attach_alternative(html_content, "text/html")
             
@@ -218,17 +279,18 @@ class DailyNotesReportService:
             return True
             
         except Exception as e:
-            import traceback
-            error_msg = f"Email sending error for user {user.username}: {str(e)}\n{traceback.format_exc()}"
-            logger.error(error_msg)
-            print(f"[EMAIL ERROR] {error_msg}")  # Console output
+            logger.error(f"SMTP sending error: {str(e)}")
             return False
     
     @staticmethod
     def check_email_configuration():
         """Check email configuration status"""
         config_status = {
-            'sendgrid_available': bool(hasattr(settings, 'SENDGRID_API_KEY') and settings.SENDGRID_API_KEY),
+            'sendgrid_available': bool(
+                hasattr(settings, 'SENDGRID_API_KEY') and 
+                settings.SENDGRID_API_KEY and 
+                settings.SENDGRID_API_KEY.strip()
+            ),
             'smtp_available': bool(
                 hasattr(settings, 'EMAIL_HOST') and 
                 hasattr(settings, 'EMAIL_PORT') and
@@ -238,19 +300,6 @@ class DailyNotesReportService:
             'email_backend': getattr(settings, 'EMAIL_BACKEND', 'NOT SET'),
         }
         
-        # Test connection if in debug mode
-        if settings.DEBUG:
-            try:
-                if config_status['sendgrid_available']:
-                    config_status['sendgrid_status'] = 'AVAILABLE'
-                elif config_status['smtp_available']:
-                    connection = get_connection(timeout=5)
-                    connection.open()
-                    connection.close()
-                    config_status['smtp_status'] = 'CONNECTED'
-                else:
-                    config_status['status'] = 'NO EMAIL CONFIGURATION'
-            except Exception as e:
-                config_status['smtp_status'] = f'ERROR: {str(e)}'
+        logger.info(f"Email Configuration: {config_status}")
         
         return config_status
