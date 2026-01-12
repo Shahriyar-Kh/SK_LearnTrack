@@ -370,7 +370,7 @@ const HomePage = () => {
                   <span>AI Tools</span>
                 </li>
                 <li className="flex items-center gap-2">
-                  <UploadCloud className="w-4 h-4" />  // ✅
+                  <UploadCloud className="w-4 h-4" />
                   <span>Cloud Export</span>
                 </li>
                 <li className="flex items-center gap-2">
