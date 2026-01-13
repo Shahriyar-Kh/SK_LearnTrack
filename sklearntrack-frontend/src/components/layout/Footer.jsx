@@ -29,22 +29,7 @@ const Footer = () => {
             <p className="text-gray-400 mb-4">
               Your all-in-one platform for mastering any skill with AI-powered tools.
             </p>
-            <div className="flex items-center gap-3">
-              <a 
-                href="https://sk-learntrack.vercel.app/privacy-policy" 
-                className="text-gray-400 hover:text-primary-400 transition-colors text-sm flex items-center gap-1"
-              >
-                <Shield className="w-3 h-3" />
-                Privacy
-              </a>
-              <a 
-                href="https://sk-learntrack.vercel.app/terms-of-service" 
-                className="text-gray-400 hover:text-primary-400 transition-colors text-sm flex items-center gap-1"
-              >
-                <Scale className="w-3 h-3" />
-                Terms
-              </a>
-            </div>
+
           </div>
           
           {/* Modules Column */}
@@ -134,19 +119,11 @@ const Footer = () => {
                 Privacy Policy
               </Link>
               <Link 
-                to="/terms-of-service" 
+                to="/terms-of-service"
                 className="text-gray-400 hover:text-primary-400 transition-colors text-sm"
               >
                 Terms of Service
               </Link>
-              <a 
-                href="https://status.sklearntrack.com" 
-                className="text-gray-400 hover:text-primary-400 transition-colors text-sm"
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                Status
-              </a>
             </div>
           </div>
           
