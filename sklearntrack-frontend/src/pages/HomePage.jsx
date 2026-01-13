@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { 
   BookOpen, Target, TrendingUp, Users, 
   Brain, FileText, Map, BarChart3, 
-  UploadCloud, Mail, Sparkles, Zap,  // ✅ Correct name
+  UploadCloud, Mail, Sparkles, Zap,
   ArrowRight, CheckCircle, Code
 } from 'lucide-react';
 import { useEffect, useState } from 'react';
@@ -61,7 +61,7 @@ const HomePage = () => {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-blue-50">
-      {/* Navbar */}
+      {/* Navbar - Keep the landing page specific navbar */}
       <nav className="fixed top-0 w-full bg-white/80 backdrop-blur-md z-50 border-b border-gray-200">
         <div className="container mx-auto px-4 py-4">
           <div className="flex items-center justify-between">
@@ -271,12 +271,12 @@ const HomePage = () => {
                   description: 'Personalized email summaries of your daily learning progress',
                   color: 'bg-gradient-to-br from-indigo-500 to-purple-500'
                 },
-              {
-                icon: UploadCloud,  // ✅
-                title: 'Auto-Sync',
-                description: 'Export notes as PDF and sync automatically with Google Drive',
-                color: 'bg-gradient-to-br from-pink-500 to-rose-500'
-              }
+                {
+                  icon: UploadCloud,
+                  title: 'Auto-Sync',
+                  description: 'Export notes as PDF and sync automatically with Google Drive',
+                  color: 'bg-gradient-to-br from-pink-500 to-rose-500'
+                }
               ].map((feature, index) => (
                 <div
                   key={index}
@@ -339,67 +339,8 @@ const HomePage = () => {
         </div>
       </section>
 
-      {/* Footer */}
-      <footer className="bg-gray-900 text-white py-12">
-        <div className="container mx-auto px-4">
-          <div className="grid md:grid-cols-4 gap-8 mb-8">
-            <div>
-              <div className="flex items-center gap-2 mb-4">
-                <BookOpen className="w-8 h-8 text-primary-400" />
-                <span className="text-xl font-bold">SK-LearnTrack</span>
-              </div>
-              <p className="text-gray-400">
-                Your all-in-one platform for mastering any skill with AI-powered tools.
-              </p>
-            </div>
-            
-            <div>
-              <h4 className="font-semibold mb-4">Modules</h4>
-              <ul className="space-y-2 text-gray-400">
-                <li><Link to="/courses" className="hover:text-primary-400 transition-colors">Courses</Link></li>
-                <li><Link to="/notes" className="hover:text-primary-400 transition-colors">Study Notes</Link></li>
-                <li><Link to="/roadmap" className="hover:text-primary-400 transition-colors">Roadmapper</Link></li>
-                <li><Link to="/analytics" className="hover:text-primary-400 transition-colors">Analytics</Link></li>
-              </ul>
-            </div>
-            
-            <div>
-              <h4 className="font-semibold mb-4">Features</h4>
-              <ul className="space-y-2 text-gray-400">
-                <li className="flex items-center gap-2">
-                  <Brain className="w-4 h-4" />
-                  <span>AI Tools</span>
-                </li>
-                <li className="flex items-center gap-2">
-                  <UploadCloud className="w-4 h-4" />
-                  <span>Cloud Export</span>
-                </li>
-                <li className="flex items-center gap-2">
-                  <Mail className="w-4 h-4" />
-                  <span>Daily Reports</span>
-                </li>
-                <li className="flex items-center gap-2">
-                  <Code className="w-4 h-4" />
-                  <span>Code Execution</span>
-                </li>
-              </ul>
-            </div>
-            
-            <div>
-              <h4 className="font-semibold mb-4">Contact</h4>
-              <ul className="space-y-2 text-gray-400">
-                <li>support@sklearntrack.com</li>
-                <li>+1 (555) 123-4567</li>
-                <li>San Francisco, CA</li>
-              </ul>
-            </div>
-          </div>
-          
-          <div className="pt-8 border-t border-gray-800 text-center text-gray-400">
-            <p>&copy; {new Date().getFullYear()} SK-LearnTrack. All rights reserved.</p>
-          </div>
-        </div>
-      </footer>
+      {/* Use the Footer Component */}
+      <Footer />
     </div>
   );
 };

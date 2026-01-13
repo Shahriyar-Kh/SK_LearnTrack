@@ -107,10 +107,10 @@ const Footer = () => {
             <ul className="space-y-2 text-gray-400">
               <li>
                 <a 
-                  href="mailto:shahriyarkhanpk3@gmail.com" 
+                  href="mailto:shahriyarkhanpk1@gmail.com" 
                   className="hover:text-primary-400 transition-colors"
                 >
-                  shahriyarkhanpk3@gmail.com
+                  shahriyarkhanpk1@gmail.com
                 </a>
               </li>
               <li>Support: support@sklearntrack.com</li>
