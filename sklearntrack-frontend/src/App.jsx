@@ -17,6 +17,8 @@ import NotesPage from './pages/NotesPage';
 import RoadmapPage from './pages/RoadmapPage';
 import AnalyticsPage from './pages/AnalyticsPage';
 import ProfilePage from './pages/ProfilePage';
+import PrivacyPolicy from './pages/PrivacyPolicy';
+import TermsOfService from './pages/TermsOfService';
 
 // Components
 import ProtectedRoute from './components/auth/ProtectedRoute';
@@ -31,6 +33,9 @@ function App() {
           <Route path="/" element={<HomePage />} />
           <Route path="/login" element={<LoginPage />} />
           <Route path="/register" element={<RegisterPage />} />
+                  {/* Add these two new routes */}
+          <Route path="/privacy-policy" element={<PrivacyPolicy />} />
+          <Route path="/terms-of-service" element={<TermsOfService />} />
 
           {/* Protected Routes */}
           <Route path="/dashboard" element={

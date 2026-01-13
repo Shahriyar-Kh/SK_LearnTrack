@@ -7,6 +7,7 @@ import {
   ArrowRight, CheckCircle, Code
 } from 'lucide-react';
 import { useEffect, useState } from 'react';
+import Footer from '@/components/layout/Footer'; // Import the Footer component
 
 const HomePage = () => {
   const [activeFeature, setActiveFeature] = useState(0);
