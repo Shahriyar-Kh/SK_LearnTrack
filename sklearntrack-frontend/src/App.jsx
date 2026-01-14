@@ -18,7 +18,6 @@ import AnalyticsPage from './pages/AnalyticsPage';
 import ProfilePage from './pages/ProfilePage';
 import PrivacyPolicy from './pages/PrivacyPolicy';
 import TermsOfService from './pages/TermsOfService';
-import CompleteProfilePage from '@/pages/CompleteProfilePage';
 
 import DashboardPage from '@/pages/User_DashboardPage';
 // Import other user pages as needed
@@ -65,16 +64,6 @@ function App() {
             <RegisterPage />
           </GuestRoute>
         } />
-
-            {/* Profile Completion - Authenticated users only */}
-        <Route path="/complete-profile" element={
-          <ProtectedRoute>
-            <CompleteProfilePage />
-          </ProtectedRoute>
-        } />
-
-
-
 
                   {/* Add these two new routes */}
           <Route path="/privacy-policy" element={<PrivacyPolicy />} />
