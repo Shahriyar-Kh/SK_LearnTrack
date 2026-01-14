@@ -10,7 +10,6 @@ import { store } from './store';
 import HomePage from './pages/HomePage';
 import LoginPage from './pages/LoginPage';
 import RegisterPage from './pages/RegisterPage';
-import DashboardPage from './pages/DashboardPage';
 import CoursesPage from './pages/CoursesPage';
 import CourseDetailPage from './pages/CourseDetailPage';
 import NotesPage from './pages/NotesPage';
@@ -19,30 +18,82 @@ import AnalyticsPage from './pages/AnalyticsPage';
 import ProfilePage from './pages/ProfilePage';
 import PrivacyPolicy from './pages/PrivacyPolicy';
 import TermsOfService from './pages/TermsOfService';
+import CompleteProfilePage from '@/pages/CompleteProfilePage';
 
-// Components
-import ProtectedRoute from './components/auth/ProtectedRoute';
+import DashboardPage from '@/pages/User_DashboardPage';
+// Import other user pages as needed
+
+// Admin Pages
+import AdminDashboard from '@/pages/Admin_Dashboard';
+
+// guards
+import ProtectedRoute from '@/components/guards/ProtectedRoute';
+import GuestRoute from '@/components/guards/GuestRoute';
+import AdminRoute from '@/components/guards/AdminRoute';
+import { useEffect } from 'react';
 
 function App() {
+  useEffect(() => {
+    // Log current auth state for debugging
+    const token = localStorage.getItem('accessToken') || localStorage.getItem('token');
+    const userStr = localStorage.getItem('user');
+    
+    console.log('[App] Auth State:', {
+      hasToken: !!token,
+      hasUser: !!userStr,
+      user: userStr ? JSON.parse(userStr) : null
+    });
+  }, []);
   return (
     <Provider store={store}>
       <Router>
         <Toaster position="top-right" />
-        <Routes>
-          {/* Public Routes */}
-          <Route path="/" element={<HomePage />} />
-          <Route path="/login" element={<LoginPage />} />
-          <Route path="/register" element={<RegisterPage />} />
+         <Routes>
+        {/* Public Routes */}
+        <Route path="/" element={
+          <GuestRoute>
+            <HomePage />
+          </GuestRoute>
+        } />
+         <Route path="/login" element={
+          <GuestRoute>
+            <LoginPage />
+          </GuestRoute>
+        } />
+          <Route path="/register" element={
+          <GuestRoute>
+            <RegisterPage />
+          </GuestRoute>
+        } />
+
+            {/* Profile Completion - Authenticated users only */}
+        <Route path="/complete-profile" element={
+          <ProtectedRoute>
+            <CompleteProfilePage />
+          </ProtectedRoute>
+        } />
+
+
+
+
                   {/* Add these two new routes */}
           <Route path="/privacy-policy" element={<PrivacyPolicy />} />
           <Route path="/terms-of-service" element={<TermsOfService />} />
 
-          {/* Protected Routes */}
-          <Route path="/dashboard" element={
-            <ProtectedRoute>
-              <DashboardPage />
-            </ProtectedRoute>
-          } />
+        {/* User Dashboard - Student role (no role restriction = all authenticated users) */}
+        <Route path="/dashboard" element={
+          <ProtectedRoute>
+            <DashboardPage />
+          </ProtectedRoute>
+        } />
+
+         {/* Admin Dashboard - Admin role only */}
+        <Route path="/admin-dashboard" element={
+          <AdminRoute>
+            <AdminDashboard />
+          </AdminRoute>
+        } />
+
           <Route path="/courses" element={
             <ProtectedRoute>
               <CoursesPage />

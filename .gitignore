@@ -21,3 +21,7 @@ sklearntrack_backend/media/
 
 # client secret files
 SK_LearnTrack\client_secret.json
+
+*.sqlite3
+*.db
+*.sqlite
