@@ -1,4 +1,4 @@
-# FILE: accounts/serializers.py
+# FILE: accounts/serializers.py - FIXED VERSION
 # ============================================================================
 
 from rest_framework import serializers
@@ -78,14 +78,12 @@ class UserRegistrationSerializer(serializers.ModelSerializer):
     
     def create(self, validated_data):
         """Create new user with 'student' role by default"""
-        # Remove password_confirm as it's not a model field
         validated_data.pop('password_confirm')
         password = validated_data.pop('password')
         
         # Ensure role is set to 'student' for regular registration
         validated_data['role'] = 'student'
         
-        # Create user
         user = User.objects.create_user(
             password=password,
             **validated_data
@@ -103,13 +101,13 @@ class ProfileSerializer(serializers.ModelSerializer):
         fields = [
             'avatar', 'bio', 'skill_interests',
             'email_notifications', 'weekly_summary', 'course_reminders',
-            'total_study_days', 'current_streak', 'longest_streak'
+            'total_study_days', 'current_streak', 'longest_streak', 'total_notes'
         ]
-        read_only_fields = ['total_study_days', 'current_streak', 'longest_streak']
+        read_only_fields = ['total_study_days', 'current_streak', 'longest_streak', 'total_notes']
 
 
 class UserSerializer(serializers.ModelSerializer):
-    """Serializer for user details"""
+    """Serializer for user details with role"""
     
     profile = ProfileSerializer(read_only=True)
     
@@ -143,10 +141,23 @@ class EmailTokenObtainPairSerializer(TokenObtainPairSerializer):
     
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        # Remove username field and add email field
         if 'username' in self.fields:
             self.fields.pop('username')
         self.fields['email'] = serializers.EmailField(required=True)
+    
+    @classmethod
+    def get_token(cls, user):
+        """Override to add custom claims to token"""
+        token = super().get_token(user)
+        
+        # Add custom claims
+        token['email'] = user.email
+        token['role'] = user.role
+        token['full_name'] = user.full_name
+        token['is_staff'] = user.is_staff
+        token['is_superuser'] = user.is_superuser
+        
+        return token
     
     def validate(self, attrs):
         """Validate and authenticate user with email"""
@@ -198,4 +209,54 @@ class EmailTokenObtainPairSerializer(TokenObtainPairSerializer):
         """Determine redirect URL based on user role"""
         if user.role == 'admin' or user.is_staff or user.is_superuser:
             return '/admin-dashboard'
+        # All non-admin users (including 'student' role) go to user dashboard
         return '/dashboard'
+
+
+class GoogleAuthSerializer(serializers.Serializer):
+    """Serializer for Google OAuth authentication"""
+    credential = serializers.CharField(required=True)
+
+
+class PasswordResetRequestSerializer(serializers.Serializer):
+    """Serializer for password reset request"""
+    email = serializers.EmailField(required=True)
+
+
+class PasswordResetConfirmSerializer(serializers.Serializer):
+    """Serializer for password reset confirmation"""
+    token = serializers.CharField(required=True)
+    new_password = serializers.CharField(required=True, min_length=8)
+    new_password_confirm = serializers.CharField(required=True, min_length=8)
+    
+    def validate(self, data):
+        if data['new_password'] != data['new_password_confirm']:
+            raise serializers.ValidationError({
+                'new_password_confirm': 'Passwords do not match'
+            })
+        try:
+            validate_password(data['new_password'])
+        except DjangoValidationError as e:
+            raise serializers.ValidationError({
+                'new_password': list(e.messages)
+            })
+        return data
+
+
+class ProfileUpdateSerializer(serializers.ModelSerializer):
+    """Serializer for updating profile after OAuth"""
+    
+    class Meta:
+        model = User
+        fields = [
+            'full_name', 'country', 'education_level', 
+            'field_of_study', 'learning_goal', 'preferred_study_hours'
+        ]
+    
+    def update(self, instance, validated_data):
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        
+        instance.save()
+        
+        return instance

@@ -1,9 +1,11 @@
-# FILE: accounts/models.py - COMPLETE FIX
+# FILE: accounts/models.py - ENHANCED VERSION
 # ============================================================================
 
 from django.contrib.auth.models import AbstractUser, BaseUserManager
 from django.db import models
 from django.utils.translation import gettext_lazy as _
+from django.utils import timezone
+import uuid
 
 
 class CustomUserManager(BaseUserManager):
@@ -18,7 +20,7 @@ class CustomUserManager(BaseUserManager):
         extra_fields.setdefault('is_active', True)
         extra_fields.setdefault('role', 'student')
         
-        # Auto-generate username from email
+        # Auto-generate username from email if not provided
         if 'username' not in extra_fields or not extra_fields.get('username'):
             base_username = email.split('@')[0]
             username = base_username
@@ -31,7 +33,8 @@ class CustomUserManager(BaseUserManager):
             extra_fields['username'] = username
         
         user = self.model(email=email, **extra_fields)
-        user.set_password(password)
+        if password:
+            user.set_password(password)
         user.save(using=self._db)
         
         return user
@@ -85,11 +88,11 @@ class User(AbstractUser):
     
     # Use email for authentication
     USERNAME_FIELD = 'email'
-    REQUIRED_FIELDS = ['full_name']
+    REQUIRED_FIELDS = []  # Made flexible for Google OAuth
     
     # Custom fields
     role = models.CharField(max_length=20, choices=ROLE_CHOICES, default='student')
-    full_name = models.CharField(max_length=255)
+    full_name = models.CharField(max_length=255, blank=True)
     country = models.CharField(max_length=100, blank=True)
     education_level = models.CharField(
         max_length=50, 
@@ -100,6 +103,10 @@ class User(AbstractUser):
     learning_goal = models.TextField(blank=True)
     preferred_study_hours = models.IntegerField(default=2)
     timezone = models.CharField(max_length=50, default='UTC')
+    
+    # OAuth fields
+    google_id = models.CharField(max_length=255, blank=True, null=True, unique=True)
+
     
     # Account status
     email_verified = models.BooleanField(default=False)
@@ -125,7 +132,7 @@ class User(AbstractUser):
         
         # Auto-generate username if not provided
         if not self.username:
-            base_username = self.email.split('@')[0]
+            base_username = self.email.split('@')[0] if self.email else f'user_{uuid.uuid4().hex[:8]}'
             username = base_username
             counter = 1
             
@@ -138,7 +145,7 @@ class User(AbstractUser):
         # Set role to admin if user is staff or superuser
         if self.is_staff or self.is_superuser:
             self.role = 'admin'
-        
+    
         super().save(*args, **kwargs)
     
     def __str__(self):
@@ -166,6 +173,7 @@ class Profile(models.Model):
     total_study_days = models.IntegerField(default=0)
     current_streak = models.IntegerField(default=0)
     longest_streak = models.IntegerField(default=0)
+    total_notes = models.IntegerField(default=0)
     
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -191,6 +199,7 @@ class LoginActivity(models.Model):
     user_agent = models.TextField()
     login_at = models.DateTimeField(auto_now_add=True)
     location = models.CharField(max_length=255, blank=True)
+    device_type = models.CharField(max_length=50, blank=True)
     
     class Meta:
         db_table = 'login_activities'
@@ -200,3 +209,43 @@ class LoginActivity(models.Model):
     
     def __str__(self):
         return f"{self.user.email} - {self.login_at}"
+
+
+class PasswordReset(models.Model):
+    """Password reset tokens"""
+    
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='password_resets')
+    token = models.CharField(max_length=255, unique=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField()
+    used = models.BooleanField(default=False)
+    
+    class Meta:
+        db_table = 'password_resets'
+        ordering = ['-created_at']
+    
+    def is_valid(self):
+        return not self.used and timezone.now() < self.expires_at
+    
+    def __str__(self):
+        return f"Reset token for {self.user.email}"
+
+
+class EmailVerification(models.Model):
+    """Email verification tokens"""
+    
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='email_verifications')
+    token = models.CharField(max_length=255, unique=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField()
+    verified = models.BooleanField(default=False)
+    
+    class Meta:
+        db_table = 'email_verifications'
+        ordering = ['-created_at']
+    
+    def is_valid(self):
+        return not self.verified and timezone.now() < self.expires_at
+    
+    def __str__(self):
+        return f"Verification token for {self.user.email}"

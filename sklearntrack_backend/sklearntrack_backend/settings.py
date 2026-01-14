@@ -4,20 +4,27 @@
 import os
 from pathlib import Path
 from datetime import timedelta
+
+
 from decouple import config
 import dj_database_url  # ADD THIS LINE
+import logging
+
+logger = logging.getLogger(__name__)
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
+# Create static directory if it doesn't exist (fix for the warning)
+os.makedirs(BASE_DIR / 'static', exist_ok=True)
+
 # Security Settings
-SECRET_KEY = config('SECRET_KEY')
-DEBUG = config('DEBUG', default=False, cast=bool)
-ALLOWED_HOSTS = [
-    'sk-learntrack-pkw6.onrender.com',
-    '.onrender.com',
-    'localhost',
-    '127.0.0.1',
-]
+SECRET_KEY = config('SECRET_KEY', default='django-insecure-default-key-for-dev')
+DEBUG = config('DEBUG', default=True, cast=bool)
+ALLOWED_HOSTS = config(
+    'ALLOWED_HOSTS', 
+    default='localhost,127.0.0.1,.onrender.com,sk-learntrack-pkw6.onrender.com',
+    cast=lambda v: [s.strip() for s in v.split(',')]
+)
 # Add Render hostname if exists
 RENDER_EXTERNAL_HOSTNAME = os.environ.get('RENDER_EXTERNAL_HOSTNAME')
 if RENDER_EXTERNAL_HOSTNAME:
@@ -33,24 +40,25 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
     
-    # Third party apps - ORDER MATTERS
-    'corsheaders',  # Must be before CommonMiddleware
+    # Third party apps
+    'corsheaders',
     'rest_framework',
     'rest_framework_simplejwt',
     'rest_framework_simplejwt.token_blacklist',
     'django_celery_beat',
     
     # Local apps
-    'accounts.apps.AccountsConfig',
-    'courses.apps.CoursesConfig',
-    'notes.apps.NotesConfig',
-    'roadmaps.apps.RoadmapsConfig',
-    'analytics.apps.AnalyticsConfig',
+    'accounts',
+    'courses',
+    'notes',
+    'roadmaps',
+    'analytics',
 ]
 
 MIDDLEWARE = [
-    'corsheaders.middleware.CorsMiddleware',  # MUST BE FIRST
+    'corsheaders.middleware.CorsMiddleware',
     'django.middleware.security.SecurityMiddleware',
+    'whitenoise.middleware.WhiteNoiseMiddleware',  # Add this
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -80,41 +88,34 @@ TEMPLATES = [
 WSGI_APPLICATION = 'sklearntrack_backend.wsgi.application'
 
 
-# Database Configuration
-if DEBUG:
-    # Use SQLite for local development
+# Database Configuration - FIXED VERSION
+# Try to get DATABASE_URL from environment, fallback to SQLite
+DATABASE_URL = config('DATABASE_URL', default=None)
+
+if DATABASE_URL:
+    # Parse the DATABASE_URL for PostgreSQL or other external databases
+    DATABASES = {
+        'default': dj_database_url.parse(
+            DATABASE_URL,
+            conn_max_age=600,
+            ssl_require=not DEBUG,
+        )
+    }
+else:
+    # Fallback to SQLite for local development
     DATABASES = {
         'default': {
             'ENGINE': 'django.db.backends.sqlite3',
             'NAME': BASE_DIR / 'db.sqlite3',
         }
     }
-else:
-    # Use PostgreSQL for production
-    DATABASES = {
-        'default': dj_database_url.config(
-            default=config('DATABASE_URL', default='postgresql://postgres:postgres@localhost:5432/postgres'),
-            conn_max_age=600,
-            conn_health_checks=True,
-        )
-    }
-# Password Validation
+
+# Password validation
 AUTH_PASSWORD_VALIDATORS = [
-    {
-        'NAME': 'django.contrib.auth.password_validation.UserAttributeSimilarityValidator',
-    },
-    {
-        'NAME': 'django.contrib.auth.password_validation.MinimumLengthValidator',
-        'OPTIONS': {
-            'min_length': 8,
-        }
-    },
-    {
-        'NAME': 'django.contrib.auth.password_validation.CommonPasswordValidator',
-    },
-    {
-        'NAME': 'django.contrib.auth.password_validation.NumericPasswordValidator',
-    },
+    {'NAME': 'django.contrib.auth.password_validation.UserAttributeSimilarityValidator'},
+    {'NAME': 'django.contrib.auth.password_validation.MinimumLengthValidator'},
+    {'NAME': 'django.contrib.auth.password_validation.CommonPasswordValidator'},
+    {'NAME': 'django.contrib.auth.password_validation.NumericPasswordValidator'},
 ]
 
 # Internationalization
@@ -123,19 +124,20 @@ TIME_ZONE = 'UTC'
 USE_I18N = True
 USE_TZ = True
 
-# Static files (CSS, JavaScript, Images)
+# Static files
 STATIC_URL = '/static/'
 STATIC_ROOT = BASE_DIR / 'staticfiles'
-STATICFILES_DIRS = []
+STATICFILES_DIRS = [BASE_DIR / 'static']
+STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
 
 # Media files
 MEDIA_URL = '/media/'
 MEDIA_ROOT = BASE_DIR / 'media'
 
-# Create media directories
-(MEDIA_ROOT / 'notes' / 'images').mkdir(parents=True, exist_ok=True)
-(MEDIA_ROOT / 'notes' / 'pdfs').mkdir(parents=True, exist_ok=True)
-(MEDIA_ROOT / 'avatars').mkdir(parents=True, exist_ok=True)
+# Create directories if they don't exist
+os.makedirs(MEDIA_ROOT / 'avatars', exist_ok=True)
+os.makedirs(MEDIA_ROOT / 'notes/images', exist_ok=True)
+os.makedirs(MEDIA_ROOT / 'notes/pdfs', exist_ok=True)
 
 # Custom User Model - CRITICAL
 AUTH_USER_MODEL = 'accounts.User'
@@ -146,86 +148,68 @@ AUTHENTICATION_BACKENDS = [
     'django.contrib.auth.backends.ModelBackend',  # Fallback
 ]
 
-# REST Framework Configuration
+# REST Framework
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': [
         'rest_framework_simplejwt.authentication.JWTAuthentication',
     ],
     'DEFAULT_PERMISSION_CLASSES': [
-        'rest_framework.permissions.IsAuthenticated',
+        'rest_framework.permissions.IsAuthenticatedOrReadOnly',
     ],
     'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
     'PAGE_SIZE': 20,
-    'DATETIME_FORMAT': '%Y-%m-%d %H:%M:%S',
-    'DATE_FORMAT': '%Y-%m-%d',
-    'DEFAULT_RENDERER_CLASSES': [
-        'rest_framework.renderers.JSONRenderer',
-    ],
-    'DEFAULT_PARSER_CLASSES': [
-        'rest_framework.parsers.JSONParser',
-        'rest_framework.parsers.MultiPartParser',
-        'rest_framework.parsers.FormParser',
-    ],
     'EXCEPTION_HANDLER': 'rest_framework.views.exception_handler',
 }
+# ============================================================================
+# JWT SETTINGS - ENHANCED WITH CUSTOM CLAIMS
+# ============================================================================
 
-# JWT Settings
 SIMPLE_JWT = {
-    'ACCESS_TOKEN_LIFETIME': timedelta(hours=1),
+    'ACCESS_TOKEN_LIFETIME': timedelta(minutes=60),
     'REFRESH_TOKEN_LIFETIME': timedelta(days=7),
     'ROTATE_REFRESH_TOKENS': True,
     'BLACKLIST_AFTER_ROTATION': True,
     'UPDATE_LAST_LOGIN': True,
-    
     'ALGORITHM': 'HS256',
     'SIGNING_KEY': SECRET_KEY,
-    'VERIFYING_KEY': None,
-    'AUDIENCE': None,
-    'ISSUER': None,
-    'JWK_URL': None,
-    'LEEWAY': 0,
-    
     'AUTH_HEADER_TYPES': ('Bearer',),
     'AUTH_HEADER_NAME': 'HTTP_AUTHORIZATION',
     'USER_ID_FIELD': 'id',
     'USER_ID_CLAIM': 'user_id',
-    'USER_AUTHENTICATION_RULE': 'rest_framework_simplejwt.authentication.default_user_authentication_rule',
-    
     'AUTH_TOKEN_CLASSES': ('rest_framework_simplejwt.tokens.AccessToken',),
     'TOKEN_TYPE_CLAIM': 'token_type',
+    
+    # Custom token claims
     'TOKEN_USER_CLASS': 'rest_framework_simplejwt.models.TokenUser',
     
-    'JTI_CLAIM': 'jti',
-    
-    'SLIDING_TOKEN_REFRESH_EXP_CLAIM': 'refresh_exp',
-    'SLIDING_TOKEN_LIFETIME': timedelta(minutes=5),
-    'SLIDING_TOKEN_REFRESH_LIFETIME': timedelta(days=1),
+    # These will be added automatically by our serializer
+    'USER_AUTHENTICATION_RULE': 'rest_framework_simplejwt.authentication.default_user_authentication_rule',
 }
 
+
+# CORS Settings
+# CORS Settings for production and development
+if DEBUG:
+    CORS_ALLOW_ALL_ORIGINS = True  # Only in development
+else:
+    CORS_ALLOW_ALL_ORIGINS = False
+
 CORS_ALLOWED_ORIGINS = [
+    "http://localhost:3000",
+    "http://localhost:5173",
+    "http://127.0.0.1:3000",
+    "http://127.0.0.1:5173",
     "https://sk-learntrack.vercel.app",
-    "https://sk-learntrack-git-main-shahriyar-khans-projects-dbef3e31.vercel.app",
-    "https://sk-learntrack-5n3xxdrwr-shahriyar-khans-projects-dbef3e31.vercel.app",
-    "http://localhost:3000",  # For local development
-    "http://localhost:5173",  # Vite default port
+    "https://sk-learntrack-pkw6.onrender.com",
 ]
-# Add Render's hostname to CORS_ALLOWED_ORIGINS
-RENDER_EXTERNAL_HOSTNAME = os.environ.get('RENDER_EXTERNAL_HOSTNAME')
-if RENDER_EXTERNAL_HOSTNAME:
-    CORS_ALLOWED_ORIGINS.append(f"https://{RENDER_EXTERNAL_HOSTNAME}")
+
+# Add origins from environment
+env_origins = config('CORS_ALLOWED_ORIGINS', default='', cast=lambda v: [s.strip() for s in v.split(',') if s.strip()])
+CORS_ALLOWED_ORIGINS.extend(env_origins)
 
 CORS_ALLOW_CREDENTIALS = True
-CORS_ALLOW_ALL_ORIGINS = False  # Keep this False for security
-
-CORS_ALLOW_METHODS = [
-    'DELETE',
-    'GET',
-    'OPTIONS',
-    'PATCH',
-    'POST',
-    'PUT',
-]
-
+CORS_ALLOW_METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS']
+#  CRITICAL: Include all necessary headers for OAuth
 CORS_ALLOW_HEADERS = [
     'accept',
     'accept-encoding',
@@ -236,39 +220,21 @@ CORS_ALLOW_HEADERS = [
     'user-agent',
     'x-csrftoken',
     'x-requested-with',
+    'access-control-allow-credentials',
+    'access-control-allow-origin',
 ]
-CSRF_TRUSTED_ORIGINS = [
-    "https://sk-learntrack-pkw6.onrender.com",
-    "https://sk-learntrack.vercel.app",
-    "https://sk-learntrack-git-main-shahriyar-khans-projects-dbef3e31.vercel.app",
-    "https://sk-learntrack-5n3xxdrwr-shahriyar-khans-projects-dbef3e31.vercel.app",
-]
+
+#  Allow preflight requests to be cached
+CORS_PREFLIGHT_MAX_AGE = 86400
 # Email Configuration
-# SendGrid API Key (preferred method)
-SENDGRID_API_KEY = config('SENDGRID_API_KEY', default='')
-
-# SMTP Settings (fallback)
-EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
-EMAIL_HOST = config('EMAIL_HOST', default='smtp.sendgrid.net')
-EMAIL_PORT = config('EMAIL_PORT', default=587, cast=int)
-EMAIL_USE_TLS = config('EMAIL_USE_TLS', default=True, cast=bool)
-EMAIL_HOST_USER = config('EMAIL_HOST_USER', default='apikey')
-EMAIL_HOST_PASSWORD = config('SENDGRID_API_KEY', default='')  # Same as API key for SMTP
-DEFAULT_FROM_EMAIL = config('DEFAULT_FROM_EMAIL', default='noreply@sklearntrack.com')
-
-# Email timeout settings (prevents hanging)
-EMAIL_TIMEOUT = 10  # 10 seconds timeout
-
-# Development: Use console backend
-if DEBUG:
-    EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
-    print("✅ Development: Using console email backend")
-else:
-    # Production: Check if SendGrid is configured
-    if SENDGRID_API_KEY and SENDGRID_API_KEY.strip():
-        print("✅ Production: SendGrid API configured")
-    else:
-        print("⚠️ Production: SendGrid API key not found, email may fail")
+EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend' if DEBUG else 'django.core.mail.backends.smtp.EmailBackend'
+if not DEBUG:
+    EMAIL_HOST = config('EMAIL_HOST', default='smtp.gmail.com')
+    EMAIL_PORT = config('EMAIL_PORT', default=587, cast=int)
+    EMAIL_USE_TLS = config('EMAIL_USE_TLS', default=True, cast=bool)
+    EMAIL_HOST_USER = config('EMAIL_HOST_USER', default='')
+    EMAIL_HOST_PASSWORD = config('EMAIL_HOST_PASSWORD', default='')
+    DEFAULT_FROM_EMAIL = config('DEFAULT_FROM_EMAIL', default='noreply@sklearntrack.com')
 
         
 # Celery Configuration
@@ -297,7 +263,10 @@ DATA_UPLOAD_MAX_MEMORY_SIZE = 10485760  # 10MB
 ALLOWED_IMAGE_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.gif', '.webp']
 ALLOWED_DOCUMENT_EXTENSIONS = ['.pdf', '.doc', '.docx', '.txt']
 
-# Logging Configuration
+# ============================================================================
+# LOGGING - ENHANCED FOR OAUTH DEBUGGING
+# ============================================================================
+
 LOGGING = {
     'version': 1,
     'disable_existing_loggers': False,
@@ -309,11 +278,6 @@ LOGGING = {
         'simple': {
             'format': '{levelname} {message}',
             'style': '{',
-        },
-    },
-    'filters': {
-        'require_debug_true': {
-            '()': 'django.utils.log.RequireDebugTrue',
         },
     },
     'handlers': {
@@ -339,24 +303,14 @@ LOGGING = {
             'level': 'INFO',
             'propagate': False,
         },
-        'django.request': {
-            'handlers': ['console', 'file'],
-            'level': 'ERROR',
-            'propagate': False,
-        },
-        'django.db.backends': {
-            'handlers': ['console'],
-            'level': 'WARNING',
-            'propagate': False,
-        },
         'accounts': {
             'handlers': ['console'],
-            'level': 'DEBUG',
+            'level': 'DEBUG',  # Debug level for auth issues
             'propagate': False,
         },
-        'notes': {
+        'google.auth': {
             'handlers': ['console'],
-            'level': 'DEBUG',
+            'level': 'DEBUG',  # Debug level for Google OAuth
             'propagate': False,
         },
     },
@@ -368,12 +322,7 @@ LOGGING = {
 # Default Auto Field
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
-# Security Settings for Production
-if not DEBUG:
-    SECURE_SSL_REDIRECT = True
-    SECURE_BROWSER_XSS_FILTER = True
-    SECURE_CONTENT_TYPE_NOSNIFF = True
-    X_FRAME_OPTIONS = 'DENY'
+
 
 # Session settings
 SESSION_COOKIE_SAMESITE = 'Lax'
@@ -426,7 +375,35 @@ def custom_404(request, exception=None):
 # Add this to settings.py
 handler404 = 'sklearntrack_backend.settings.custom_404'
 
-# Google OAuth for Drive
+# ============================================================================
+# GOOGLE OAUTH CONFIGURATION
+# ============================================================================
+
+# Google OAuth - MUST be configured in production
 GOOGLE_OAUTH_CLIENT_ID = config('GOOGLE_OAUTH_CLIENT_ID', default='')
 GOOGLE_OAUTH_CLIENT_SECRET = config('GOOGLE_OAUTH_CLIENT_SECRET', default='')
-GOOGLE_OAUTH_REDIRECT_URI = os.environ.get('GOOGLE_OAUTH_REDIRECT_URI', None)
+
+# Validate Google OAuth configuration
+if not GOOGLE_OAUTH_CLIENT_ID or GOOGLE_OAUTH_CLIENT_ID == 'your-google-client-id.apps.googleusercontent.com':
+    logger.warning("Google OAuth Client ID is not configured. Google authentication will not work.")
+else:
+    logger.info(f"Google OAuth configured with Client ID: {GOOGLE_OAUTH_CLIENT_ID[:20]}...")
+
+# Google OAuth Redirect URI (used for some OAuth flows)
+GOOGLE_OAUTH_REDIRECT_URI = config(
+    'GOOGLE_OAUTH_REDIRECT_URI', 
+    default='http://localhost:8000/auth/google/callback/'
+)
+
+
+# Security settings for production
+if not DEBUG:
+    SECURE_SSL_REDIRECT = True
+    SECURE_BROWSER_XSS_FILTER = True
+    SECURE_CONTENT_TYPE_NOSNIFF = True
+    SECURE_HSTS_SECONDS = 31536000
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = True
+    SECURE_HSTS_PRELOAD = True
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
+    CSRF_TRUSTED_ORIGINS = CORS_ALLOWED_ORIGINS
