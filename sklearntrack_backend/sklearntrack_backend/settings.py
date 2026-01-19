@@ -225,24 +225,38 @@ CORS_ALLOW_HEADERS = [
 #  Allow preflight requests to be cached
 CORS_PREFLIGHT_MAX_AGE = 86400
 
-# =============== email =================
-# ✅ Frontend URL for email links
+
+# =============== EMAIL CONFIGURATION =================
+# ✅ Frontend URL for email links - CRITICAL FOR PRODUCTION
 FRONTEND_URL = config('FRONTEND_URL', default='http://localhost:3000')
 
 # Email Configuration
-if DEBUG:
-    # Console backend for development
-    EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
-else:
-    # SMTP for production
-    EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
-
+EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
 EMAIL_HOST = config('EMAIL_HOST', default='smtp.gmail.com')
 EMAIL_PORT = config('EMAIL_PORT', default=587, cast=int)
 EMAIL_USE_TLS = True
 EMAIL_HOST_USER = config('EMAIL_HOST_USER', default='')
 EMAIL_HOST_PASSWORD = config('EMAIL_HOST_PASSWORD', default='')
 DEFAULT_FROM_EMAIL = config('DEFAULT_FROM_EMAIL', default='noreply@sklearntrack.com')
+
+# SendGrid Configuration (if using SendGrid in production)
+SENDGRID_API_KEY = config('SENDGRID_API_KEY', default='')
+
+# If SendGrid API key is provided, use SendGrid backend
+if SENDGRID_API_KEY:
+    EMAIL_BACKEND = 'sendgrid_backend.SendgridBackend'
+    SENDGRID_SANDBOX_MODE_IN_DEBUG = False
+    logger.info("Using SendGrid email backend")
+elif DEBUG:
+    # Use console for development
+    EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
+    logger.info("Using console email backend for development")
+else:
+    # Use SMTP for production
+    logger.info("Using SMTP email backend")
+
+# Email timeout settings
+EMAIL_TIMEOUT = 10
 
         
 # Celery Configuration
