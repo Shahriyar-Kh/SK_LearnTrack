@@ -1,4 +1,4 @@
-// FILE: src/pages/LoginPage.jsx - FIXED VERSION WITH ENHANCED ERROR HANDLING
+// FILE: src/pages/LoginPage.jsx - FIXED WITH SPECIFIC ERROR MESSAGES
 // ============================================================================
 
 import { useState, useEffect } from 'react';
@@ -13,21 +13,15 @@ const LoginPage = () => {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState({ type: '', text: '' });
   const [googleInitialized, setGoogleInitialized] = useState(false);
+  const [fieldErrors, setFieldErrors] = useState({ email: '', password: '' }); // ✅ NEW: Field-level errors
 
   useEffect(() => {
-    // Initialize Google OAuth
     const initGoogleOAuth = () => {
       if (window.google && window.google.accounts && window.google.accounts.id) {
         const clientId = import.meta.env.VITE_GOOGLE_OAUTH_CLIENT_ID;
         
-        console.log('[Google OAuth] Initializing with Client ID:', clientId);
-        
         if (!clientId || clientId === 'your-google-client-id.apps.googleusercontent.com') {
-          console.error('[Google OAuth] Client ID is not configured or is placeholder');
-          setMessage({
-            type: 'error',
-            text: 'Google OAuth is not configured. Please set VITE_GOOGLE_OAUTH_CLIENT_ID in your .env file'
-          });
+          console.error('[Google OAuth] Client ID is not configured');
           return;
         }
 
@@ -41,7 +35,6 @@ const LoginPage = () => {
             ux_mode: 'popup',
           });
           
-          // Render button
           const buttonDiv = document.getElementById('google-signin-button');
           if (buttonDiv && buttonDiv.children.length === 0) {
             window.google.accounts.id.renderButton(
@@ -55,53 +48,27 @@ const LoginPage = () => {
                 logo_alignment: 'center',
               }
             );
-            console.log('[Google OAuth] Button rendered successfully');
             setGoogleInitialized(true);
           }
         } catch (error) {
           console.error('[Google OAuth] Initialization error:', error);
-          setMessage({
-            type: 'error',
-            text: 'Failed to initialize Google Sign-In. Please refresh the page.'
-          });
         }
-      } else {
-        console.log('[Google OAuth] Google API not loaded yet');
       }
     };
 
-    // Load Google OAuth script
     if (!document.querySelector('script[src*="accounts.google.com/gsi/client"]')) {
-      console.log('[Google OAuth] Loading Google script...');
       const script = document.createElement('script');
       script.src = 'https://accounts.google.com/gsi/client';
       script.async = true;
       script.defer = true;
-      script.onload = () => {
-        console.log('[Google OAuth] Script loaded');
-        initGoogleOAuth();
-      };
-      script.onerror = () => {
-        console.error('[Google OAuth] Failed to load Google script');
-        setMessage({
-          type: 'error',
-          text: 'Failed to load Google Sign-In. Please check your internet connection.'
-        });
-      };
+      script.onload = () => initGoogleOAuth();
       document.body.appendChild(script);
     } else {
-      console.log('[Google OAuth] Script already loaded');
       initGoogleOAuth();
     }
-
-    return () => {
-      // Cleanup if needed
-    };
   }, []);
 
   const handleGoogleResponse = async (response) => {
-    console.log('[Google OAuth] Response received:', response);
-    
     try {
       setLoading(true);
       setMessage({ type: '', text: '' });
@@ -109,8 +76,6 @@ const LoginPage = () => {
       if (!response.credential) {
         throw new Error('No credential received from Google');
       }
-
-      console.log('[Google OAuth] Sending credential to backend...');
       
       const res = await fetch(`${API_BASE_URL}/api/auth/google_auth/`, {
         method: 'POST',
@@ -120,26 +85,18 @@ const LoginPage = () => {
         },
         body: JSON.stringify({ credential: response.credential }),
       });
-
-      console.log('[Google OAuth] Backend response status:', res.status);
       
       const data = await res.json();
-      console.log('[Google OAuth] Backend response data:', data);
 
       if (!res.ok) {
         throw new Error(data.detail || data.error || 'Authentication failed');
       }
 
-      // Store tokens
       if (data.tokens) {
-        console.log('[Google OAuth] Storing tokens...');
         localStorage.setItem('accessToken', data.tokens.access);
-        localStorage.setItem('token', data.tokens.access); // Also store as 'token'
+        localStorage.setItem('token', data.tokens.access);
         localStorage.setItem('refreshToken', data.tokens.refresh);
         localStorage.setItem('user', JSON.stringify(data.user));
-        localStorage.setItem('redirect', data.redirect || '/dashboard');
-      } else {
-        throw new Error('No tokens received from server');
       }
 
       setMessage({
@@ -147,9 +104,6 @@ const LoginPage = () => {
         text: data.is_new_user ? 'Welcome! Account created successfully!' : 'Login successful!',
       });
 
-      console.log('[Google OAuth] Redirecting to:', data.redirect);
-
-      // Redirect based on backend response
       setTimeout(() => {
         navigate(data.redirect || '/dashboard');
       }, 1000);
@@ -165,16 +119,47 @@ const LoginPage = () => {
     }
   };
 
+  // ✅ NEW: Email format validation
+  const validateEmail = (email) => {
+    if (!email) {
+      return 'Email is required';
+    }
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+      return 'Please enter a valid email address';
+    }
+    return '';
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
 
-    if (!formData.email || !formData.password) {
-      setMessage({ type: 'error', text: 'Please fill in all fields' });
+    // ✅ FIXED: Frontend validation before API call
+    const errors = {
+      email: '',
+      password: ''
+    };
+
+    // Validate email format
+    const emailError = validateEmail(formData.email);
+    if (emailError) {
+      errors.email = emailError;
+      setFieldErrors(errors);
+      setMessage({ type: 'error', text: emailError });
+      return;
+    }
+
+    // Validate password exists
+    if (!formData.password) {
+      errors.password = 'Password is required';
+      setFieldErrors(errors);
+      setMessage({ type: 'error', text: 'Password is required' });
       return;
     }
 
     setLoading(true);
     setMessage({ type: '', text: '' });
+    setFieldErrors({ email: '', password: '' });
 
     try {
       console.log('[Email Login] Attempting login for:', formData.email);
@@ -197,23 +182,44 @@ const LoginPage = () => {
       if (response.ok) {
         // Store tokens
         localStorage.setItem('accessToken', data.access);
-        localStorage.setItem('token', data.access); // Also store as 'token'
+        localStorage.setItem('token', data.access);
         localStorage.setItem('refreshToken', data.refresh);
         localStorage.setItem('user', JSON.stringify(data.user));
-        localStorage.setItem('redirect', data.redirect || '/dashboard');
 
         setMessage({ type: 'success', text: 'Login successful! Redirecting...' });
-
-        console.log('[Email Login] Redirecting to:', data.redirect);
 
         setTimeout(() => {
           navigate(data.redirect || '/dashboard');
         }, 1000);
       } else {
-        setMessage({
-          type: 'error',
-          text: data.detail || 'Invalid email or password',
-        });
+        // ✅ FIXED: Handle specific error types from backend
+        const errorType = data.error_type;
+        const errorDetail = data.detail;
+
+        if (errorType === 'email_not_found') {
+          setFieldErrors({ ...errors, email: errorDetail });
+          setMessage({
+            type: 'error',
+            text: errorDetail || 'This email is not registered. Please sign up first.',
+          });
+        } else if (errorType === 'incorrect_password') {
+          setFieldErrors({ ...errors, password: errorDetail });
+          setMessage({
+            type: 'error',
+            text: errorDetail || 'Incorrect password. Please try again.',
+          });
+        } else if (errorType === 'account_disabled') {
+          setMessage({
+            type: 'error',
+            text: errorDetail || 'This account has been disabled. Please contact support.',
+          });
+        } else {
+          // Generic error
+          setMessage({
+            type: 'error',
+            text: errorDetail || 'Login failed. Please check your credentials.',
+          });
+        }
       }
     } catch (error) {
       console.error('[Email Login] Error:', error);
@@ -341,14 +347,29 @@ const LoginPage = () => {
                   <input
                     type="email"
                     value={formData.email}
-                    onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                    className="w-full pl-12 pr-4 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all bg-white"
+                    onChange={(e) => {
+                      setFormData({ ...formData, email: e.target.value });
+                      // Clear email error when typing
+                      if (fieldErrors.email) {
+                        setFieldErrors({ ...fieldErrors, email: '' });
+                      }
+                    }}
+                    className={`w-full pl-12 pr-4 py-3 border rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all bg-white ${
+                      fieldErrors.email ? 'border-red-500' : 'border-gray-200'
+                    }`}
                     placeholder="your@email.com"
                     autoComplete="email"
                     required
                     disabled={loading}
                   />
                 </div>
+                {/* ✅ NEW: Show field-specific error */}
+                {fieldErrors.email && (
+                  <p className="text-red-500 text-sm mt-1 flex items-center gap-1">
+                    <AlertCircle className="w-4 h-4" />
+                    {fieldErrors.email}
+                  </p>
+                )}
               </div>
 
               {/* Password Input */}
@@ -369,8 +390,16 @@ const LoginPage = () => {
                   <input
                     type={showPassword ? 'text' : 'password'}
                     value={formData.password}
-                    onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-                    className="w-full pl-12 pr-12 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all bg-white"
+                    onChange={(e) => {
+                      setFormData({ ...formData, password: e.target.value });
+                      // Clear password error when typing
+                      if (fieldErrors.password) {
+                        setFieldErrors({ ...fieldErrors, password: '' });
+                      }
+                    }}
+                    className={`w-full pl-12 pr-12 py-3 border rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all bg-white ${
+                      fieldErrors.password ? 'border-red-500' : 'border-gray-200'
+                    }`}
                     placeholder="••••••••"
                     autoComplete="current-password"
                     required
@@ -385,6 +414,13 @@ const LoginPage = () => {
                     {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
                   </button>
                 </div>
+                {/* ✅ NEW: Show field-specific error */}
+                {fieldErrors.password && (
+                  <p className="text-red-500 text-sm mt-1 flex items-center gap-1">
+                    <AlertCircle className="w-4 h-4" />
+                    {fieldErrors.password}
+                  </p>
+                )}
               </div>
 
               {/* Submit Button */}
