@@ -18,7 +18,8 @@ import AnalyticsPage from './pages/AnalyticsPage';
 import ProfilePage from './pages/ProfilePage';
 import PrivacyPolicy from './pages/PrivacyPolicy';
 import TermsOfService from './pages/TermsOfService';
-
+import ForgotPasswordPage from './pages/ForgotPasswordPage';
+import ResetPasswordPage from './pages/ResetPasswordPage';
 import DashboardPage from '@/pages/User_DashboardPage';
 // Import other user pages as needed
 
@@ -64,6 +65,17 @@ function App() {
             <RegisterPage />
           </GuestRoute>
         } />
+        {/* Password Reset Routes */}
+<Route path="/forgot-password" element={
+  <GuestRoute>
+    <ForgotPasswordPage />
+  </GuestRoute>
+} />
+<Route path="/reset-password" element={
+  <GuestRoute>
+    <ResetPasswordPage />
+  </GuestRoute>
+} />
 
                   {/* Add these two new routes */}
           <Route path="/privacy-policy" element={<PrivacyPolicy />} />

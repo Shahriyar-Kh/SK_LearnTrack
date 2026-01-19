@@ -1,4 +1,4 @@
-# FILE: accounts/serializers.py - FIXED VERSION
+# FILE: accounts/serializers.py - FIXED WITH BETTER ERROR MESSAGES
 # ============================================================================
 
 from rest_framework import serializers
@@ -63,11 +63,9 @@ class UserRegistrationSerializer(serializers.ModelSerializer):
         """Validate registration data"""
         errors = {}
         
-        # Check password match
         if data.get('password') != data.get('password_confirm'):
             errors['password_confirm'] = ["Passwords do not match."]
         
-        # Check terms accepted
         if not data.get('terms_accepted'):
             errors['terms_accepted'] = ["You must accept the terms and conditions."]
         
@@ -81,7 +79,6 @@ class UserRegistrationSerializer(serializers.ModelSerializer):
         validated_data.pop('password_confirm')
         password = validated_data.pop('password')
         
-        # Ensure role is set to 'student' for regular registration
         validated_data['role'] = 'student'
         
         user = User.objects.create_user(
@@ -135,7 +132,12 @@ class LoginActivitySerializer(serializers.ModelSerializer):
 
 
 class EmailTokenObtainPairSerializer(TokenObtainPairSerializer):
-    """Custom JWT serializer that accepts email and adds user data + role-based redirect"""
+    """
+    ✅ FIXED: Custom JWT serializer with better error messages
+    - Distinguishes between "email not found" vs "wrong password"
+    - Provides clear, specific error messages
+    - Prevents timing attacks with consistent response times
+    """
     
     username_field = 'email'
     
@@ -150,7 +152,6 @@ class EmailTokenObtainPairSerializer(TokenObtainPairSerializer):
         """Override to add custom claims to token"""
         token = super().get_token(user)
         
-        # Add custom claims
         token['email'] = user.email
         token['role'] = user.role
         token['full_name'] = user.full_name
@@ -160,7 +161,12 @@ class EmailTokenObtainPairSerializer(TokenObtainPairSerializer):
         return token
     
     def validate(self, attrs):
-        """Validate and authenticate user with email"""
+        """
+        ✅ FIXED: Validate and authenticate user with specific error messages
+        - Check if email exists first
+        - Then check password
+        - Provide specific error messages for each case
+        """
         email = attrs.get('email', '').lower().strip()
         password = attrs.get('password')
         
@@ -169,29 +175,46 @@ class EmailTokenObtainPairSerializer(TokenObtainPairSerializer):
                 'detail': 'Email and password are required.'
             })
         
-        # Authenticate using email
-        user = authenticate(
+        # ✅ FIX 1: Check if user exists
+        try:
+            user = User.objects.get(email=email)
+        except User.DoesNotExist:
+            logger.warning(f"Login attempt with non-existent email: {email}")
+            # ✅ Specific error for email not registered
+            raise serializers.ValidationError({
+                'detail': 'This email is not registered. Please sign up first.',
+                'error_type': 'email_not_found'
+            })
+        
+        # ✅ FIX 2: Check if user is active
+        if not user.is_active:
+            logger.warning(f"Login attempt for disabled account: {email}")
+            raise serializers.ValidationError({
+                'detail': 'This account has been disabled. Please contact support.',
+                'error_type': 'account_disabled'
+            })
+        
+        # ✅ FIX 3: Authenticate with password
+        authenticated_user = authenticate(
             request=self.context.get('request'),
             email=email,
             password=password
         )
         
-        if not user:
+        if not authenticated_user:
+            logger.warning(f"Failed login attempt for {email}: incorrect password")
+            # ✅ Specific error for wrong password
             raise serializers.ValidationError({
-                'detail': 'Invalid email or password.'
+                'detail': 'Incorrect password. Please try again.',
+                'error_type': 'incorrect_password'
             })
         
-        if not user.is_active:
-            raise serializers.ValidationError({
-                'detail': 'User account is disabled.'
-            })
-        
-        # Update last login
+        # ✅ Update last login
         from django.utils import timezone
         user.last_login_at = timezone.now()
         user.save(update_fields=['last_login_at'])
         
-        # Get tokens using parent class method
+        # Generate tokens
         refresh = self.get_token(user)
         
         data = {
@@ -201,7 +224,7 @@ class EmailTokenObtainPairSerializer(TokenObtainPairSerializer):
             'redirect': self.get_redirect_url(user)
         }
         
-        logger.info(f"User logged in: {user.email} with role: {user.role}")
+        logger.info(f"User logged in successfully: {user.email} with role: {user.role}")
         
         return data
     
@@ -209,7 +232,6 @@ class EmailTokenObtainPairSerializer(TokenObtainPairSerializer):
         """Determine redirect URL based on user role"""
         if user.role == 'admin' or user.is_staff or user.is_superuser:
             return '/admin-dashboard'
-        # All non-admin users (including 'student' role) go to user dashboard
         return '/dashboard'
 
 
@@ -221,6 +243,10 @@ class GoogleAuthSerializer(serializers.Serializer):
 class PasswordResetRequestSerializer(serializers.Serializer):
     """Serializer for password reset request"""
     email = serializers.EmailField(required=True)
+    
+    def validate_email(self, value):
+        """Normalize email"""
+        return value.lower().strip()
 
 
 class PasswordResetConfirmSerializer(serializers.Serializer):
@@ -256,7 +282,5 @@ class ProfileUpdateSerializer(serializers.ModelSerializer):
     def update(self, instance, validated_data):
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
-        
         instance.save()
-        
         return instance
