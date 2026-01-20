@@ -230,34 +230,37 @@ CORS_PREFLIGHT_MAX_AGE = 86400
 # Frontend URL for email links
 FRONTEND_URL = config('FRONTEND_URL', default='https://sk-learntrack.vercel.app')
 
-# Email Configuration - SIMPLIFIED VERSION
-EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
+# Email Configuration - PRODUCTION FIX
+# Use console backend if no email credentials (for Render free tier testing)
+EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'  # Default to console
 
-# ✅ FIX: Always use SMTP, even in development for testing
-if DEBUG:
-    # In development, you can use console OR SMTP
-    # For testing, use SMTP to match production
-    EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
-    logger.info("Using SMTP email backend for development testing")
-else:
-    EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
-    logger.info("Using SMTP email backend for production")
-
-# ✅ FIX: Simple SMTP configuration (works with Gmail, SendGrid, etc.)
-EMAIL_HOST = config('EMAIL_HOST', default='smtp.gmail.com')
-EMAIL_PORT = config('EMAIL_PORT', default=587, cast=int)
-EMAIL_USE_TLS = True
+# Only use SMTP if credentials are provided
+EMAIL_HOST = config('EMAIL_HOST', default='')
 EMAIL_HOST_USER = config('EMAIL_HOST_USER', default='')
 EMAIL_HOST_PASSWORD = config('EMAIL_HOST_PASSWORD', default='')
-DEFAULT_FROM_EMAIL = config('DEFAULT_FROM_EMAIL', default='noreply@sklearntrack.com')
+
+# If email credentials are provided, use SMTP
+if EMAIL_HOST and EMAIL_HOST_USER and EMAIL_HOST_PASSWORD:
+    EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
+    EMAIL_PORT = config('EMAIL_PORT', default=587, cast=int)
+    EMAIL_USE_TLS = True
+    DEFAULT_FROM_EMAIL = config('DEFAULT_FROM_EMAIL', default=EMAIL_HOST_USER)
+    logger.info("✅ Using SMTP email backend for production")
+else:
+    EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
+    logger.info("⚠️ Using console email backend - no email credentials configured")
+    logger.info("ℹ️ For production, set EMAIL_HOST, EMAIL_HOST_USER, EMAIL_HOST_PASSWORD")
+
+# Email timeout to prevent hanging
+EMAIL_TIMEOUT = 10  # 10 seconds timeout
         
-# Celery Configuration
-CELERY_BROKER_URL = config('CELERY_BROKER_URL', default='redis://localhost:6379/0')
-CELERY_RESULT_BACKEND = config('CELERY_RESULT_BACKEND', default='redis://localhost:6379/0')
-CELERY_ACCEPT_CONTENT = ['json']
-CELERY_TASK_SERIALIZER = 'json'
-CELERY_RESULT_SERIALIZER = 'json'
-CELERY_TIMEZONE = TIME_ZONE
+# # Celery Configuration
+# CELERY_BROKER_URL = config('CELERY_BROKER_URL', default='redis://localhost:6379/0')
+# CELERY_RESULT_BACKEND = config('CELERY_RESULT_BACKEND', default='redis://localhost:6379/0')
+# CELERY_ACCEPT_CONTENT = ['json']
+# CELERY_TASK_SERIALIZER = 'json'
+# CELERY_RESULT_SERIALIZER = 'json'
+# CELERY_TIMEZONE = TIME_ZONE
 
 # AI Configuration (Groq API)
 GROQ_API_KEY = config('GROQ_API_KEY', default='')
@@ -357,9 +360,6 @@ else:
     SESSION_COOKIE_SECURE = False
     CSRF_COOKIE_SECURE = False
 
-# Should be:
-CELERY_TASK_ALWAYS_EAGER = True
-CELERY_TASK_EAGER_PROPAGATES = True
 
 
 # Add at the bottom of settings.py
@@ -407,14 +407,39 @@ GOOGLE_OAUTH_REDIRECT_URI = config(
 )
 
 
-# Security settings for production
+# ============================================================================
+# PRODUCTION FIXES FOR RENDER
+# ============================================================================
+
+# Gunicorn settings for Render free tier
+GUNICORN_CONFIG = {
+    'workers': 1,  # Use only 1 worker to avoid memory issues
+    'timeout': 120,  # Increase timeout to 120 seconds
+    'keepalive': 5,
+}
+
+# Database connection optimization for PostgreSQL on Render
+if DATABASE_URL and 'postgres' in DATABASE_URL:
+    DATABASES['default']['CONN_MAX_AGE'] = 60  # Reduce to 60 seconds
+    DATABASES['default']['OPTIONS'] = {
+        'connect_timeout': 10,
+        'keepalives': 1,
+        'keepalives_idle': 30,
+        'keepalives_interval': 10,
+        'keepalives_count': 5,
+    }
+    logger.info("✅ PostgreSQL database configuration optimized for Render")
+
+# Security headers for production
 if not DEBUG:
+    SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
     SECURE_SSL_REDIRECT = True
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
     SECURE_BROWSER_XSS_FILTER = True
     SECURE_CONTENT_TYPE_NOSNIFF = True
     SECURE_HSTS_SECONDS = 31536000
     SECURE_HSTS_INCLUDE_SUBDOMAINS = True
     SECURE_HSTS_PRELOAD = True
-    SESSION_COOKIE_SECURE = True
-    CSRF_COOKIE_SECURE = True
     CSRF_TRUSTED_ORIGINS = CORS_ALLOWED_ORIGINS
+    logger.info("✅ Production security headers enabled")
