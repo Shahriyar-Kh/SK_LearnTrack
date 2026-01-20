@@ -9,6 +9,8 @@ from rest_framework_simplejwt.views import TokenObtainPairView
 from django.contrib.auth import get_user_model
 from django.utils import timezone
 from django.core.mail import send_mail
+from accounts.tasks import send_password_reset_email
+
 from django.conf import settings
 from google.oauth2 import id_token
 from google.auth.transport import requests as google_requests
@@ -381,50 +383,30 @@ class AuthViewSet(viewsets.GenericViewSet):
             raise
     
     def send_password_reset_email(self, user, token, request):
-        """Send password reset link"""
-        try:
-            # ✅ CRITICAL: Get FRONTEND_URL from settings
-            frontend_url = getattr(settings, 'FRONTEND_URL', 'http://localhost:3000')
-            
-            # Log the FRONTEND_URL for debugging
-            logger.info(f"[EMAIL] Using FRONTEND_URL: {frontend_url}")
-            
-            # Construct reset URL
-            reset_url = f"{frontend_url}/reset-password?token={token}"
-            logger.info(f"[EMAIL] Reset URL: {reset_url}")
-            
-            email_subject = 'Reset your SK-LearnTrack password'
-            email_message = f'''Hello {user.full_name or user.email},
+        frontend_url = settings.FRONTEND_URL
+        reset_url = f"{frontend_url}/reset-password?token={token}"
 
-    You requested to reset your password for SK-LearnTrack.
+        subject = 'Reset your SK-LearnTrack password'
+        message = f'''Hello {user.full_name or user.email},
 
-    Click the link below to reset your password (valid for 1 hour):
+    You requested to reset your password.
+
+    Click below (valid for 1 hour):
     {reset_url}
 
-    If you didn't request this, please ignore this email.
+    If you did not request this, ignore this email.
 
-    Best regards,
-    SK-LearnTrack Team'''
-            
-            # Log email sending attempt
-            logger.info(f"[EMAIL] Attempting to send to: {user.email}")
-            
-            send_mail(
-                subject=email_subject,
-                message=email_message,
-                from_email=settings.DEFAULT_FROM_EMAIL,
-                recipient_list=[user.email],
-                fail_silently=False,
-            )
-            
-            logger.info(f"✅ Password reset email sent to: {user.email}")
-            return True
-            
-        except Exception as e:
-            logger.error(f"❌ Failed to send reset email to {user.email}: {str(e)}")
-            logger.error(f"[EMAIL CONFIG] BACKEND={settings.EMAIL_BACKEND}, HOST={settings.EMAIL_HOST}")
-            raise
+    SK-LearnTrack Team
+    '''
 
+        # 🔥 IMPORTANT CHANGE (1 LINE)
+        send_password_reset_email.delay(
+            subject,
+            message,
+            user.email
+        )
+
+        
     def track_login_activity(self, request, user):
         """Track user login activity"""
         try:
