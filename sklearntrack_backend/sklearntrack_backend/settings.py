@@ -230,35 +230,26 @@ CORS_PREFLIGHT_MAX_AGE = 86400
 # Frontend URL for email links
 FRONTEND_URL = config('FRONTEND_URL', default='https://sk-learntrack.vercel.app')
 
-# Email Configuration - Use SMTP for SendGrid
+# Email Configuration - SIMPLIFIED VERSION
 EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
 
-# Check if we have SendGrid API key, use SendGrid SMTP
-SENDGRID_API_KEY = config('SENDGRID_API_KEY', default='')
-
-if SENDGRID_API_KEY:
-    # SendGrid SMTP Configuration
-    EMAIL_HOST = 'smtp.sendgrid.net'
-    EMAIL_PORT = 587
-    EMAIL_USE_TLS = True
-    EMAIL_HOST_USER = 'apikey'  # This is fixed for SendGrid
-    EMAIL_HOST_PASSWORD = SENDGRID_API_KEY  # Your SendGrid API key
-    DEFAULT_FROM_EMAIL = config('DEFAULT_FROM_EMAIL', default='noreply@sklearntrack.com')
-    logger.info("Using SendGrid SMTP for email")
-elif DEBUG:
-    # Development - console backend
-    EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
-    logger.info("Using console email backend for development")
+# ✅ FIX: Always use SMTP, even in development for testing
+if DEBUG:
+    # In development, you can use console OR SMTP
+    # For testing, use SMTP to match production
+    EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
+    logger.info("Using SMTP email backend for development testing")
 else:
-    # Fallback to Gmail SMTP or other SMTP
-    EMAIL_HOST = config('EMAIL_HOST', default='smtp.gmail.com')
-    EMAIL_PORT = config('EMAIL_PORT', default=587, cast=int)
-    EMAIL_USE_TLS = True
-    EMAIL_HOST_USER = config('EMAIL_HOST_USER', default='')
-    EMAIL_HOST_PASSWORD = config('EMAIL_HOST_PASSWORD', default='')
-    DEFAULT_FROM_EMAIL = config('DEFAULT_FROM_EMAIL', default='noreply@sklearntrack.com')
-    logger.info("Using SMTP for email")
+    EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
+    logger.info("Using SMTP email backend for production")
 
+# ✅ FIX: Simple SMTP configuration (works with Gmail, SendGrid, etc.)
+EMAIL_HOST = config('EMAIL_HOST', default='smtp.gmail.com')
+EMAIL_PORT = config('EMAIL_PORT', default=587, cast=int)
+EMAIL_USE_TLS = True
+EMAIL_HOST_USER = config('EMAIL_HOST_USER', default='')
+EMAIL_HOST_PASSWORD = config('EMAIL_HOST_PASSWORD', default='')
+DEFAULT_FROM_EMAIL = config('DEFAULT_FROM_EMAIL', default='noreply@sklearntrack.com')
         
 # Celery Configuration
 CELERY_BROKER_URL = config('CELERY_BROKER_URL', default='redis://localhost:6379/0')
@@ -367,12 +358,9 @@ else:
     CSRF_COOKIE_SECURE = False
 
 # Should be:
-if DEBUG:
-    CELERY_TASK_ALWAYS_EAGER = True
-    CELERY_TASK_EAGER_PROPAGATES = True
-else:
-    CELERY_TASK_ALWAYS_EAGER = False
-    CELERY_TASK_EAGER_PROPAGATES = False
+CELERY_TASK_ALWAYS_EAGER = True
+CELERY_TASK_EAGER_PROPAGATES = True
+
 
 # Add at the bottom of settings.py
 # Custom 404 handler
