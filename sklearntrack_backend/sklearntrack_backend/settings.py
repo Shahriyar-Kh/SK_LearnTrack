@@ -226,11 +226,12 @@ CORS_ALLOW_HEADERS = [
 CORS_PREFLIGHT_MAX_AGE = 86400
 
 
-# =============== EMAIL CONFIGURATION =================
-# Frontend URL for email links
-FRONTEND_URL = config('FRONTEND_URL', default='https://sk-learntrack.vercel.app')
+# =============== EMAIL CONFIGURATION - COMPLETE FIX =================
 
-# Email Configuration - CRITICAL FIX FOR PRODUCTION
+# Frontend URL for email links
+FRONTEND_URL = config('FRONTEND_URL', default='http://localhost:3000')
+
+# Get email configuration from environment
 EMAIL_HOST = config('EMAIL_HOST', default='')
 EMAIL_HOST_USER = config('EMAIL_HOST_USER', default='')
 EMAIL_HOST_PASSWORD = config('EMAIL_HOST_PASSWORD', default='')
@@ -239,38 +240,52 @@ EMAIL_USE_TLS = config('EMAIL_USE_TLS', default=True, cast=bool)
 EMAIL_USE_SSL = config('EMAIL_USE_SSL', default=False, cast=bool)
 EMAIL_TIMEOUT = 30  # 30 seconds timeout
 
-# CRITICAL: Check if we're in production (Render) or development
-IS_PRODUCTION = os.environ.get('RENDER') is not None  # Render sets this env var
+# ✅ FIX: Determine email backend based on credentials
+# Check if ALL required email credentials are present
+email_configured = bool(EMAIL_HOST and EMAIL_HOST_USER and EMAIL_HOST_PASSWORD)
 
-if IS_PRODUCTION:
-    # ✅ PRODUCTION: Must have email credentials configured
-    if EMAIL_HOST and EMAIL_HOST_USER and EMAIL_HOST_PASSWORD:
-        EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
-        DEFAULT_FROM_EMAIL = config('DEFAULT_FROM_EMAIL', default=EMAIL_HOST_USER)
-        SERVER_EMAIL = DEFAULT_FROM_EMAIL
-        logger.info(f"✅ PRODUCTION: Using SMTP email backend with {EMAIL_HOST}")
-        logger.info(f"✅ Email configured: {EMAIL_HOST_USER} via {EMAIL_HOST}:{EMAIL_PORT}")
-    else:
-        # ⚠️ PRODUCTION WITHOUT EMAIL: Log warning but don't crash
-        EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
-        logger.error("❌ PRODUCTION ERROR: Email credentials not configured!")
-        logger.error("❌ Set EMAIL_HOST, EMAIL_HOST_USER, EMAIL_HOST_PASSWORD in Render environment variables")
-        logger.error("❌ Emails will be logged to console only!")
+if email_configured:
+    # ✅ Email credentials are present - use SMTP
+    EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
+    DEFAULT_FROM_EMAIL = config('DEFAULT_FROM_EMAIL', default=EMAIL_HOST_USER)
+    SERVER_EMAIL = DEFAULT_FROM_EMAIL
+    
+    logger.info("=" * 60)
+    logger.info("✅ EMAIL CONFIGURATION: SMTP Backend Active")
+    logger.info(f"   Host: {EMAIL_HOST}")
+    logger.info(f"   Port: {EMAIL_PORT}")
+    logger.info(f"   User: {EMAIL_HOST_USER}")
+    logger.info(f"   TLS: {EMAIL_USE_TLS}")
+    logger.info(f"   SSL: {EMAIL_USE_SSL}")
+    logger.info(f"   From: {DEFAULT_FROM_EMAIL}")
+    logger.info("=" * 60)
 else:
-    # 🔧 DEVELOPMENT: Use console backend for testing
+    # ❌ Missing credentials - use console backend
     EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
-    logger.info("🔧 DEVELOPMENT: Using console email backend (emails printed to terminal)")
+    DEFAULT_FROM_EMAIL = 'webmaster@localhost'
+    
+    logger.warning("=" * 60)
+    logger.warning("⚠️  EMAIL CONFIGURATION: Console Backend (Development Mode)")
+    logger.warning("   Emails will be printed to console, not sent!")
+    logger.warning("")
+    logger.warning("   Missing configuration:")
+    if not EMAIL_HOST:
+        logger.warning("   ❌ EMAIL_HOST not set")
+    if not EMAIL_HOST_USER:
+        logger.warning("   ❌ EMAIL_HOST_USER not set")
+    if not EMAIL_HOST_PASSWORD:
+        logger.warning("   ❌ EMAIL_HOST_PASSWORD not set")
+    logger.warning("")
+    logger.warning("   To enable email sending, set these environment variables:")
+    logger.warning("   1. EMAIL_HOST=smtp.gmail.com")
+    logger.warning("   2. EMAIL_HOST_USER=your-email@gmail.com")
+    logger.warning("   3. EMAIL_HOST_PASSWORD=your-app-password")
+    logger.warning("=" * 60)
 
-# Email headers for better deliverability
-if EMAIL_BACKEND == 'django.core.mail.backends.smtp.EmailBackend':
-    EMAIL_SUBJECT_PREFIX = '[SK-LearnTrack] '
-    
-    # Use proper from email
-    if not DEFAULT_FROM_EMAIL:
-        DEFAULT_FROM_EMAIL = EMAIL_HOST_USER
-    
-    logger.info(f"📧 Email system ready: {DEFAULT_FROM_EMAIL}")
-        
+# Email subject prefix
+EMAIL_SUBJECT_PREFIX = '[SK-LearnTrack] '
+
+# =============== END EMAIL CONFIGURATION =================
 # # Celery Configuration
 # CELERY_BROKER_URL = config('CELERY_BROKER_URL', default='redis://localhost:6379/0')
 # CELERY_RESULT_BACKEND = config('CELERY_RESULT_BACKEND', default='redis://localhost:6379/0')
