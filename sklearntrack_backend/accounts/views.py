@@ -39,54 +39,47 @@ logger = logging.getLogger(__name__)
 
 
 # ==================== EMAIL HELPER FUNCTIONS ====================
-def send_email_async(subject, message, from_email, recipient_list):
+def send_email_sync(subject, message, from_email, recipient_list):
     """
-    Send email in a background thread to prevent request blocking
+    ✅ FIXED: Synchronous email sending with proper error handling
+    Use this in production to ensure emails are sent before response
     """
-    def send():
-        try:
-            from django.core.mail import send_mail
-            send_mail(
-                subject=subject,
-                message=message,
-                from_email=from_email,
-                recipient_list=recipient_list,
-                fail_silently=False,
-            )
-            logger.info(f"✅ Email sent to: {recipient_list}")
-        except Exception as e:
-            logger.error(f"❌ Failed to send email: {str(e)}")
-            # Log but don't crash
-    
-    # Start email in background thread
-    thread = threading.Thread(target=send)
-    thread.daemon = True  # Thread will close when main program exits
-    thread.start()
+    try:
+        result = send_mail(
+            subject=subject,
+            message=message,
+            from_email=from_email,
+            recipient_list=recipient_list,
+            fail_silently=False,  # ✅ CRITICAL: Don't hide errors!
+        )
+        
+        if result == 1:
+            logger.info(f"✅ Email sent successfully to: {recipient_list}")
+            return True
+        else:
+            logger.error(f"❌ Email failed to send to: {recipient_list}")
+            return False
+            
+    except Exception as e:
+        logger.error(f"❌ Email sending error: {str(e)}")
+        logger.error(f"❌ Recipients: {recipient_list}")
+        logger.error(f"❌ Subject: {subject}")
+        # Log the full exception for debugging
+        import traceback
+        logger.error(f"❌ Full traceback: {traceback.format_exc()}")
+        return False
 
-def send_email_with_timeout(subject, message, from_email, recipient_list, timeout=10):
-    """
-    Send email with timeout to prevent hanging
-    """
-    def send():
-        try:
-            from django.core.mail import send_mail
-            send_mail(
-                subject=subject,
-                message=message,
-                from_email=from_email,
-                recipient_list=recipient_list,
-                fail_silently=True,  # Don't raise exceptions
-            )
-            logger.info(f"✅ Email sent to: {recipient_list}")
-        except Exception as e:
-            logger.warning(f"⚠️ Email sending failed (non-critical): {str(e)}")
-    
-    # Use threading with timeout
-    thread = threading.Thread(target=send)
-    thread.daemon = True
-    thread.start()
-    # Don't wait for thread to complete
 
+def send_email_safe(subject, message, from_email, recipient_list):
+    """
+    ✅ SAFE VERSION: Tries to send email but doesn't crash if it fails
+    Returns success status
+    """
+    try:
+        return send_email_sync(subject, message, from_email, recipient_list)
+    except Exception as e:
+        logger.error(f"❌ Email system failure: {str(e)}")
+        return False
 
 class AuthViewSet(viewsets.GenericViewSet):
     """
@@ -506,7 +499,7 @@ class AuthViewSet(viewsets.GenericViewSet):
     
     def _send_password_reset_email(self, user, token):
         """
-        Send password reset email with timeout
+        ✅ FIXED: Send password reset email synchronously with error handling
         """
         frontend_url = settings.FRONTEND_URL
         reset_url = f"{frontend_url}/reset-password?token={token}"
@@ -514,30 +507,36 @@ class AuthViewSet(viewsets.GenericViewSet):
         subject = 'Reset Your SK-LearnTrack Password'
         message = f"""Hello {user.full_name or user.email},
 
-    You requested to reset your password for your SK-LearnTrack account.
+You requested to reset your password for your SK-LearnTrack account.
 
-    Click the link below to set a new password (valid for 1 hour):
-    {reset_url}
+Click the link below to set a new password (valid for 1 hour):
+{reset_url}
 
-    If you did not request this password reset, please ignore this email.
-    Your account security is important to us.
+If you did not request this password reset, please ignore this email.
+Your account security is important to us.
 
-    Best regards,
-    SK-LearnTrack Team
-    """
+Best regards,
+SK-LearnTrack Team
+"""
         
-        # Use async email sending with timeout
-        send_email_with_timeout(
+        # ✅ FIXED: Use synchronous sending with proper error handling
+        success = send_email_sync(
             subject=subject,
             message=message,
             from_email=settings.DEFAULT_FROM_EMAIL,
-            recipient_list=[user.email],
-            timeout=5
+            recipient_list=[user.email]
         )
+        
+        if success:
+            logger.info(f"✅ Password reset email sent to {user.email}")
+        else:
+            logger.error(f"❌ Failed to send password reset email to {user.email}")
+        
+        return success
 
     def _send_verification_email(self, user, request):
         """
-        Send email verification link with timeout
+        ✅ FIXED: Send email verification link synchronously
         """
         # Create verification token (expires in 7 days)
         token = str(uuid.uuid4())
@@ -556,25 +555,31 @@ class AuthViewSet(viewsets.GenericViewSet):
         subject = 'Verify Your SK-LearnTrack Account'
         message = f"""Welcome to SK-LearnTrack!
 
-    Please verify your email address by clicking the link below:
-    {verification_url}
+Please verify your email address by clicking the link below:
+{verification_url}
 
-    This link will expire in 7 days.
+This link will expire in 7 days.
 
-    If you did not create an account, please ignore this email.
+If you did not create an account, please ignore this email.
 
-    Thank you,
-    SK-LearnTrack Team
-    """
+Thank you,
+SK-LearnTrack Team
+"""
         
-        # Use async email sending with timeout
-        send_email_with_timeout(
+        # ✅ FIXED: Use synchronous sending
+        success = send_email_sync(
             subject=subject,
             message=message,
             from_email=settings.DEFAULT_FROM_EMAIL,
-            recipient_list=[user.email],
-            timeout=5
+            recipient_list=[user.email]
         )
+        
+        if success:
+            logger.info(f"✅ Verification email sent to {user.email}")
+        else:
+            logger.error(f"❌ Failed to send verification email to {user.email}")
+        
+        return success
         
     def _track_login_activity(self, request, user):
         """

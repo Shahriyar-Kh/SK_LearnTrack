@@ -230,29 +230,46 @@ CORS_PREFLIGHT_MAX_AGE = 86400
 # Frontend URL for email links
 FRONTEND_URL = config('FRONTEND_URL', default='https://sk-learntrack.vercel.app')
 
-# Email Configuration - PRODUCTION FIX
-# Use console backend if no email credentials (for Render free tier testing)
-EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'  # Default to console
-
-# Only use SMTP if credentials are provided
+# Email Configuration - CRITICAL FIX FOR PRODUCTION
 EMAIL_HOST = config('EMAIL_HOST', default='')
 EMAIL_HOST_USER = config('EMAIL_HOST_USER', default='')
 EMAIL_HOST_PASSWORD = config('EMAIL_HOST_PASSWORD', default='')
+EMAIL_PORT = config('EMAIL_PORT', default=587, cast=int)
+EMAIL_USE_TLS = config('EMAIL_USE_TLS', default=True, cast=bool)
+EMAIL_USE_SSL = config('EMAIL_USE_SSL', default=False, cast=bool)
+EMAIL_TIMEOUT = 30  # 30 seconds timeout
 
-# If email credentials are provided, use SMTP
-if EMAIL_HOST and EMAIL_HOST_USER and EMAIL_HOST_PASSWORD:
-    EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
-    EMAIL_PORT = config('EMAIL_PORT', default=587, cast=int)
-    EMAIL_USE_TLS = True
-    DEFAULT_FROM_EMAIL = config('DEFAULT_FROM_EMAIL', default=EMAIL_HOST_USER)
-    logger.info("✅ Using SMTP email backend for production")
+# CRITICAL: Check if we're in production (Render) or development
+IS_PRODUCTION = os.environ.get('RENDER') is not None  # Render sets this env var
+
+if IS_PRODUCTION:
+    # ✅ PRODUCTION: Must have email credentials configured
+    if EMAIL_HOST and EMAIL_HOST_USER and EMAIL_HOST_PASSWORD:
+        EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
+        DEFAULT_FROM_EMAIL = config('DEFAULT_FROM_EMAIL', default=EMAIL_HOST_USER)
+        SERVER_EMAIL = DEFAULT_FROM_EMAIL
+        logger.info(f"✅ PRODUCTION: Using SMTP email backend with {EMAIL_HOST}")
+        logger.info(f"✅ Email configured: {EMAIL_HOST_USER} via {EMAIL_HOST}:{EMAIL_PORT}")
+    else:
+        # ⚠️ PRODUCTION WITHOUT EMAIL: Log warning but don't crash
+        EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
+        logger.error("❌ PRODUCTION ERROR: Email credentials not configured!")
+        logger.error("❌ Set EMAIL_HOST, EMAIL_HOST_USER, EMAIL_HOST_PASSWORD in Render environment variables")
+        logger.error("❌ Emails will be logged to console only!")
 else:
+    # 🔧 DEVELOPMENT: Use console backend for testing
     EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
-    logger.info("⚠️ Using console email backend - no email credentials configured")
-    logger.info("ℹ️ For production, set EMAIL_HOST, EMAIL_HOST_USER, EMAIL_HOST_PASSWORD")
+    logger.info("🔧 DEVELOPMENT: Using console email backend (emails printed to terminal)")
 
-# Email timeout to prevent hanging
-EMAIL_TIMEOUT = 10  # 10 seconds timeout
+# Email headers for better deliverability
+if EMAIL_BACKEND == 'django.core.mail.backends.smtp.EmailBackend':
+    EMAIL_SUBJECT_PREFIX = '[SK-LearnTrack] '
+    
+    # Use proper from email
+    if not DEFAULT_FROM_EMAIL:
+        DEFAULT_FROM_EMAIL = EMAIL_HOST_USER
+    
+    logger.info(f"📧 Email system ready: {DEFAULT_FROM_EMAIL}")
         
 # # Celery Configuration
 # CELERY_BROKER_URL = config('CELERY_BROKER_URL', default='redis://localhost:6379/0')
