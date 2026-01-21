@@ -1,7 +1,6 @@
 # FILE: accounts/admin.py - CLEANED VERSION
 # ============================================================================
-# Profile admin is now in profiles/admin.py
-# ============================================================================
+
 
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
