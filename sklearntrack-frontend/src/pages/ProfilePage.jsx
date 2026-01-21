@@ -1,43 +1,291 @@
-import { useState } from 'react';
-import { User, Mail, MapPin, BookOpen, Globe, Clock, Target, Bell, Lock, Camera, Save, X, Calendar, TrendingUp, FileText, Award } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { User, Mail, MapPin, BookOpen, Globe, Clock, Target, Bell, Lock, Camera, Save, X, Calendar, TrendingUp, FileText, Award, Loader2 } from 'lucide-react';
+import { profileService } from '@/services/profile.service';
+import { toast } from 'react-hot-toast';
 
 const ProfilePage = () => {
   const [activeTab, setActiveTab] = useState('personal');
   const [isEditing, setIsEditing] = useState(false);
   const [showImageCrop, setShowImageCrop] = useState(false);
   const [selectedImage, setSelectedImage] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
   
-  // Mock user data
+  // Real user data from API
   const [userData, setUserData] = useState({
-    fullName: 'John Doe',
-    email: 'john.doe@example.com',
-    country: 'United States',
-    educationLevel: 'undergraduate',
-    fieldOfStudy: 'Computer Science',
-    bio: 'Passionate about AI and machine learning. Always eager to learn new technologies.',
-    learningGoal: 'Master full-stack development and machine learning',
-    preferredStudyHours: 3,
-    timezone: 'America/New_York',
+    fullName: '',
+    email: '',
+    country: '',
+    educationLevel: '',
+    fieldOfStudy: '',
+    bio: '',
+    learningGoal: '',
+    preferredStudyHours: 2,
+    timezone: 'UTC',
     avatar: null,
-    skillInterests: ['Python', 'React', 'Machine Learning', 'Data Science'],
+    skillInterests: [],
   });
 
   const [notifications, setNotifications] = useState({
-    emailNotifications: true,
-    weeklySummary: true,
-    courseReminders: true,
+    email_notifications: true,
+    weekly_summary: true,
+    course_reminders: true,
   });
 
-  const [stats] = useState({
-    totalStudyDays: 45,
-    totalNotes: 123,
-    activeCourses: 5,
-    lastLogin: '2 hours ago',
-    accountCreated: 'January 15, 2024',
-    emailVerified: true,
-    currentStreak: 7,
-    longestStreak: 14,
+  const [stats, setStats] = useState({
+    totalStudyDays: 0,
+    totalNotes: 0,
+    activeCourses: 0,
+    lastLogin: null,
+    accountCreated: null,
+    emailVerified: false,
+    currentStreak: 0,
+    longestStreak: 0,
   });
+
+  const [passwordData, setPasswordData] = useState({
+    old_password: '',
+    new_password: '',
+    new_password_confirm: '',
+  });
+
+  // Fetch profile data on mount
+  useEffect(() => {
+    fetchProfileData();
+    fetchActivityData();
+    fetchNotifications();
+  }, []);
+
+  const fetchProfileData = async () => {
+    try {
+      setLoading(true);
+      const response = await profileService.getProfile();
+      
+      setUserData({
+        fullName: response.fullName || '',
+        email: response.email || '',
+        country: response.country || '',
+        educationLevel: response.educationLevel || '',
+        fieldOfStudy: response.fieldOfStudy || '',
+        bio: response.bio || '',
+        learningGoal: response.learningGoal || '',
+        preferredStudyHours: response.preferredStudyHours || 2,
+        timezone: response.timezone || 'UTC',
+        avatar: response.avatar || null,
+        skillInterests: response.skillInterests || [],
+      });
+    } catch (error) {
+      console.error('Error fetching profile:', error);
+      toast.error('Failed to load profile data');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const fetchActivityData = async () => {
+    try {
+      const response = await profileService.getActivitySummary();
+      
+      setStats({
+        totalStudyDays: response.totalStudyDays || 0,
+        totalNotes: response.totalNotes || 0,
+        activeCourses: response.activeCourses || 0,
+        lastLogin: response.lastLogin || null,
+        accountCreated: response.accountCreated || null,
+        emailVerified: response.emailVerified || false,
+        currentStreak: response.currentStreak || 0,
+        longestStreak: response.longestStreak || 0,
+      });
+    } catch (error) {
+      console.error('Error fetching activity:', error);
+    }
+  };
+
+  const fetchNotifications = async () => {
+    try {
+      const response = await profileService.updateNotifications({});
+      setNotifications({
+        email_notifications: response.email_notifications !== undefined ? response.email_notifications : true,
+        weekly_summary: response.weekly_summary !== undefined ? response.weekly_summary : true,
+        course_reminders: response.course_reminders !== undefined ? response.course_reminders : true,
+      });
+    } catch (error) {
+      console.error('Error fetching notifications:', error);
+    }
+  };
+
+  const handleImageChange = (e) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      // Validate file size (5MB max)
+      if (file.size > 5 * 1024 * 1024) {
+        toast.error('Image size must be less than 5MB');
+        return;
+      }
+
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setSelectedImage({ file, preview: reader.result });
+        setShowImageCrop(true);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const handleAvatarUpload = async () => {
+    if (!selectedImage) return;
+
+    try {
+      setSaving(true);
+      const response = await profileService.uploadAvatar(selectedImage.file);
+      
+      if (response.success) {
+        setUserData({ ...userData, avatar: response.avatar });
+        toast.success('Avatar updated successfully!');
+        setShowImageCrop(false);
+        setSelectedImage(null);
+      }
+    } catch (error) {
+      console.error('Error uploading avatar:', error);
+      toast.error(error.response?.data?.error || 'Failed to upload avatar');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleSaveProfile = async () => {
+    try {
+      setSaving(true);
+      const response = await profileService.updateProfile({
+        fullName: userData.fullName,
+        country: userData.country,
+        educationLevel: userData.educationLevel,
+        fieldOfStudy: userData.fieldOfStudy,
+        bio: userData.bio,
+      });
+
+      if (response.success) {
+        toast.success('Profile updated successfully!');
+        setIsEditing(false);
+      }
+    } catch (error) {
+      console.error('Error saving profile:', error);
+      toast.error(error.response?.data?.error || 'Failed to update profile');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleSavePreferences = async () => {
+    try {
+      setSaving(true);
+      const response = await profileService.updatePreferences({
+        learningGoal: userData.learningGoal,
+        preferredStudyHours: userData.preferredStudyHours,
+        timezone: userData.timezone,
+        skillInterests: userData.skillInterests,
+      });
+
+      if (response.success) {
+        toast.success('Preferences updated successfully!');
+      }
+    } catch (error) {
+      console.error('Error saving preferences:', error);
+      toast.error(error.response?.data?.error || 'Failed to update preferences');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleSaveNotifications = async () => {
+    try {
+      setSaving(true);
+      const response = await profileService.updateNotifications(notifications);
+
+      if (response.success) {
+        toast.success('Notification settings updated!');
+      }
+    } catch (error) {
+      console.error('Error saving notifications:', error);
+      toast.error('Failed to update notification settings');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleChangePassword = async (e) => {
+    e.preventDefault();
+
+    if (passwordData.new_password !== passwordData.new_password_confirm) {
+      toast.error('New passwords do not match');
+      return;
+    }
+
+    if (passwordData.new_password.length < 8) {
+      toast.error('Password must be at least 8 characters');
+      return;
+    }
+
+    try {
+      setSaving(true);
+      const response = await profileService.changePassword(passwordData);
+
+      if (response.success) {
+        toast.success('Password changed successfully!');
+        setPasswordData({
+          old_password: '',
+          new_password: '',
+          new_password_confirm: '',
+        });
+      }
+    } catch (error) {
+      console.error('Error changing password:', error);
+      toast.error(error.response?.data?.errors?.old_password?.[0] || 'Failed to change password');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleAddSkill = () => {
+    const skill = prompt('Enter skill name:');
+    if (skill && !userData.skillInterests.includes(skill)) {
+      setUserData({
+        ...userData,
+        skillInterests: [...userData.skillInterests, skill],
+      });
+    }
+  };
+
+  const handleRemoveSkill = (skillToRemove) => {
+    setUserData({
+      ...userData,
+      skillInterests: userData.skillInterests.filter(skill => skill !== skillToRemove),
+    });
+  };
+
+  const formatDate = (dateString) => {
+    if (!dateString) return 'N/A';
+    const date = new Date(dateString);
+    return date.toLocaleDateString('en-US', { 
+      year: 'numeric', 
+      month: 'long', 
+      day: 'numeric' 
+    });
+  };
+
+  const formatRelativeTime = (dateString) => {
+    if (!dateString) return 'N/A';
+    const date = new Date(dateString);
+    const now = new Date();
+    const diffInMs = now - date;
+    const diffInMins = Math.floor(diffInMs / (1000 * 60));
+    const diffInHours = Math.floor(diffInMs / (1000 * 60 * 60));
+    const diffInDays = Math.floor(diffInMs / (1000 * 60 * 60 * 24));
+
+    if (diffInMins < 60) return `${diffInMins} minutes ago`;
+    if (diffInHours < 24) return `${diffInHours} hours ago`;
+    return `${diffInDays} days ago`;
+  };
 
   const tabs = [
     { id: 'personal', label: 'Personal Info', icon: User },
@@ -47,24 +295,6 @@ const ProfilePage = () => {
     { id: 'activity', label: 'Account Activity', icon: TrendingUp },
   ];
 
-  const handleImageChange = (e) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setSelectedImage(reader.result);
-        setShowImageCrop(true);
-      };
-      reader.readAsDataURL(file);
-    }
-  };
-
-  const handleSaveProfile = () => {
-    setIsEditing(false);
-    // API call to save profile
-    console.log('Saving profile:', userData);
-  };
-
   const educationLevels = [
     { value: 'high_school', label: 'High School' },
     { value: 'undergraduate', label: 'Undergraduate' },
@@ -72,6 +302,33 @@ const ProfilePage = () => {
     { value: 'postgraduate', label: 'Postgraduate' },
     { value: 'professional', label: 'Professional' },
   ];
+
+  const timezones = [
+    { value: 'America/New_York', label: 'Eastern Time (ET)' },
+    { value: 'America/Chicago', label: 'Central Time (CT)' },
+    { value: 'America/Denver', label: 'Mountain Time (MT)' },
+    { value: 'America/Los_Angeles', label: 'Pacific Time (PT)' },
+    { value: 'UTC', label: 'UTC' },
+    { value: 'Europe/London', label: 'London (GMT)' },
+    { value: 'Europe/Paris', label: 'Central European Time' },
+    { value: 'Asia/Dubai', label: 'Dubai (GST)' },
+    { value: 'Asia/Karachi', label: 'Pakistan (PKT)' },
+    { value: 'Asia/Kolkata', label: 'India (IST)' },
+    { value: 'Asia/Shanghai', label: 'China (CST)' },
+    { value: 'Asia/Tokyo', label: 'Japan (JST)' },
+    { value: 'Australia/Sydney', label: 'Sydney (AEDT)' },
+  ];
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="text-center">
+          <Loader2 className="w-12 h-12 animate-spin text-blue-600 mx-auto mb-4" />
+          <p className="text-gray-600">Loading profile...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gray-50 p-4 md:p-8">
@@ -93,7 +350,7 @@ const ProfilePage = () => {
                     {userData.avatar ? (
                       <img src={userData.avatar} alt="Profile" className="w-full h-full object-cover" />
                     ) : (
-                      userData.fullName.charAt(0)
+                      userData.fullName?.charAt(0) || userData.email?.charAt(0) || 'U'
                     )}
                   </div>
                   <button
@@ -110,7 +367,7 @@ const ProfilePage = () => {
                     className="hidden"
                   />
                 </div>
-                <h2 className="text-xl font-bold text-gray-900">{userData.fullName}</h2>
+                <h2 className="text-xl font-bold text-gray-900">{userData.fullName || 'User'}</h2>
                 <p className="text-gray-600 text-sm">{userData.email}</p>
                 {stats.emailVerified && (
                   <span className="inline-flex items-center gap-1 mt-2 px-3 py-1 bg-green-100 text-green-700 rounded-full text-xs font-medium">
@@ -185,13 +442,15 @@ const ProfilePage = () => {
                       <div className="flex gap-2">
                         <button
                           onClick={handleSaveProfile}
-                          className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
+                          disabled={saving}
+                          className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50"
                         >
-                          <Save className="w-4 h-4" />
+                          {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
                           Save Changes
                         </button>
                         <button
                           onClick={() => setIsEditing(false)}
+                          disabled={saving}
                           className="flex items-center gap-2 px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors"
                         >
                           <X className="w-4 h-4" />
@@ -251,6 +510,7 @@ const ProfilePage = () => {
                         disabled={!isEditing}
                         className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-gray-50"
                       >
+                        <option value="">Select education level</option>
                         {educationLevels.map((level) => (
                           <option key={level.value} value={level.value}>
                             {level.label}
@@ -280,9 +540,11 @@ const ProfilePage = () => {
                         onChange={(e) => setUserData({ ...userData, bio: e.target.value })}
                         disabled={!isEditing}
                         rows={4}
+                        maxLength={2000}
                         className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-gray-50"
                         placeholder="Tell us about yourself..."
                       />
+                      <p className="text-xs text-gray-500 mt-1">{userData.bio.length}/2000 characters</p>
                     </div>
                   </div>
                 </div>
@@ -300,9 +562,11 @@ const ProfilePage = () => {
                         value={userData.learningGoal}
                         onChange={(e) => setUserData({ ...userData, learningGoal: e.target.value })}
                         rows={3}
+                        maxLength={1000}
                         className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                         placeholder="What do you want to achieve?"
                       />
+                      <p className="text-xs text-gray-500 mt-1">{userData.learningGoal.length}/1000 characters</p>
                     </div>
 
                     <div>
@@ -312,14 +576,14 @@ const ProfilePage = () => {
                       <input
                         type="range"
                         min="1"
-                        max="8"
+                        max="12"
                         value={userData.preferredStudyHours}
                         onChange={(e) => setUserData({ ...userData, preferredStudyHours: parseInt(e.target.value) })}
                         className="w-full"
                       />
                       <div className="flex justify-between text-xs text-gray-500 mt-1">
                         <span>1 hour</span>
-                        <span>8 hours</span>
+                        <span>12 hours</span>
                       </div>
                     </div>
 
@@ -332,11 +596,11 @@ const ProfilePage = () => {
                           onChange={(e) => setUserData({ ...userData, timezone: e.target.value })}
                           className="w-full pl-11 pr-4 py-3 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                         >
-                          <option value="America/New_York">Eastern Time (ET)</option>
-                          <option value="America/Chicago">Central Time (CT)</option>
-                          <option value="America/Denver">Mountain Time (MT)</option>
-                          <option value="America/Los_Angeles">Pacific Time (PT)</option>
-                          <option value="UTC">UTC</option>
+                          {timezones.map((tz) => (
+                            <option key={tz.value} value={tz.value}>
+                              {tz.label}
+                            </option>
+                          ))}
                         </select>
                       </div>
                     </div>
@@ -350,19 +614,29 @@ const ProfilePage = () => {
                             className="inline-flex items-center gap-2 px-4 py-2 bg-blue-100 text-blue-700 rounded-full text-sm font-medium"
                           >
                             {skill}
-                            <button className="hover:text-blue-900">
+                            <button 
+                              onClick={() => handleRemoveSkill(skill)}
+                              className="hover:text-blue-900"
+                            >
                               <X className="w-4 h-4" />
                             </button>
                           </span>
                         ))}
-                        <button className="px-4 py-2 border-2 border-dashed border-gray-300 rounded-full text-sm text-gray-600 hover:border-blue-500 hover:text-blue-600 transition-colors">
+                        <button 
+                          onClick={handleAddSkill}
+                          className="px-4 py-2 border-2 border-dashed border-gray-300 rounded-full text-sm text-gray-600 hover:border-blue-500 hover:text-blue-600 transition-colors"
+                        >
                           + Add Skill
                         </button>
                       </div>
                     </div>
 
-                    <button className="w-full md:w-auto px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center justify-center gap-2">
-                      <Save className="w-5 h-5" />
+                    <button 
+                      onClick={handleSavePreferences}
+                      disabled={saving}
+                      className="w-full md:w-auto px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
+                    >
+                      {saving ? <Loader2 className="w-5 h-5 animate-spin" /> : <Save className="w-5 h-5" />}
                       Save Preferences
                     </button>
                   </div>
@@ -379,16 +653,20 @@ const ProfilePage = () => {
                       <div key={key} className="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
                         <div>
                           <h4 className="font-medium text-gray-900">
-                            {key.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase())}
+                            {key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
                           </h4>
                           <p className="text-sm text-gray-600 mt-1">
-                            {key === 'emailNotifications' && 'Receive email notifications for important updates'}
-                            {key === 'weeklySummary' && 'Get a weekly summary of your learning progress'}
-                            {key === 'courseReminders' && 'Receive reminders about your active courses'}
+                            {key === 'email_notifications' && 'Receive email notifications for important updates'}
+                            {key === 'weekly_summary' && 'Get a weekly summary of your learning progress'}
+                            {key === 'course_reminders' && 'Receive reminders about your active courses'}
                           </p>
                         </div>
                         <button
-                          onClick={() => setNotifications({ ...notifications, [key]: !value })}
+                          onClick={() => {
+                            const newNotifications = { ...notifications, [key]: !value };
+                            setNotifications(newNotifications);
+                            handleSaveNotifications();
+                          }}
                           className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
                             value ? 'bg-blue-600' : 'bg-gray-300'
                           }`}
@@ -413,11 +691,14 @@ const ProfilePage = () => {
                   <div className="space-y-6">
                     <div className="p-6 border border-gray-200 rounded-lg">
                       <h4 className="font-semibold text-gray-900 mb-4">Change Password</h4>
-                      <div className="space-y-4">
+                      <form onSubmit={handleChangePassword} className="space-y-4">
                         <div>
                           <label className="block text-sm font-medium text-gray-700 mb-2">Current Password</label>
                           <input
                             type="password"
+                            value={passwordData.old_password}
+                            onChange={(e) => setPasswordData({ ...passwordData, old_password: e.target.value })}
+                            required
                             className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500"
                             placeholder="••••••••"
                           />
@@ -426,6 +707,10 @@ const ProfilePage = () => {
                           <label className="block text-sm font-medium text-gray-700 mb-2">New Password</label>
                           <input
                             type="password"
+                            value={passwordData.new_password}
+                            onChange={(e) => setPasswordData({ ...passwordData, new_password: e.target.value })}
+                            required
+                            minLength={8}
                             className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500"
                             placeholder="••••••••"
                           />
@@ -434,22 +719,23 @@ const ProfilePage = () => {
                           <label className="block text-sm font-medium text-gray-700 mb-2">Confirm New Password</label>
                           <input
                             type="password"
+                            value={passwordData.new_password_confirm}
+                            onChange={(e) => setPasswordData({ ...passwordData, new_password_confirm: e.target.value })}
+                            required
+                            minLength={8}
                             className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500"
                             placeholder="••••••••"
                           />
                         </div>
-                        <button className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors">
+                        <button 
+                          type="submit"
+                          disabled={saving}
+                          className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 flex items-center gap-2"
+                        >
+                          {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
                           Update Password
                         </button>
-                      </div>
-                    </div>
-
-                    <div className="p-6 border border-gray-200 rounded-lg">
-                      <h4 className="font-semibold text-gray-900 mb-2">Two-Factor Authentication</h4>
-                      <p className="text-sm text-gray-600 mb-4">Add an extra layer of security to your account</p>
-                      <button className="px-6 py-3 bg-gray-900 text-white rounded-lg hover:bg-gray-800 transition-colors">
-                        Enable 2FA
-                      </button>
+                      </form>
                     </div>
                   </div>
                 </div>
@@ -497,17 +783,21 @@ const ProfilePage = () => {
                   <div className="space-y-4">
                     <div className="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
                       <span className="text-gray-700">Last Login</span>
-                      <span className="font-medium text-gray-900">{stats.lastLogin}</span>
+                      <span className="font-medium text-gray-900">{formatRelativeTime(stats.lastLogin)}</span>
                     </div>
                     <div className="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
                       <span className="text-gray-700">Account Created</span>
-                      <span className="font-medium text-gray-900">{stats.accountCreated}</span>
+                      <span className="font-medium text-gray-900">{formatDate(stats.accountCreated)}</span>
                     </div>
                     <div className="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
                       <span className="text-gray-700">Email Status</span>
-                      <span className="inline-flex items-center gap-1 px-3 py-1 bg-green-100 text-green-700 rounded-full text-sm font-medium">
+                      <span className={`inline-flex items-center gap-1 px-3 py-1 rounded-full text-sm font-medium ${
+                        stats.emailVerified 
+                          ? 'bg-green-100 text-green-700'
+                          : 'bg-yellow-100 text-yellow-700'
+                      }`}>
                         <Award className="w-4 h-4" />
-                        Verified
+                        {stats.emailVerified ? 'Verified' : 'Not Verified'}
                       </span>
                     </div>
                   </div>
@@ -518,26 +808,29 @@ const ProfilePage = () => {
         </div>
       </div>
 
-      {/* Image Crop Modal (Placeholder) */}
+      {/* Image Crop Modal */}
       {showImageCrop && selectedImage && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl p-6 max-w-md w-full">
-            <h3 className="text-xl font-bold mb-4">Crop Profile Picture</h3>
+            <h3 className="text-xl font-bold mb-4">Upload Profile Picture</h3>
             <div className="mb-4">
-              <img src={selectedImage} alt="Preview" className="w-full rounded-lg" />
+              <img src={selectedImage.preview} alt="Preview" className="w-full rounded-lg" />
             </div>
             <div className="flex gap-3">
               <button
-                onClick={() => {
-                  setUserData({ ...userData, avatar: selectedImage });
-                  setShowImageCrop(false);
-                }}
-                className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                onClick={handleAvatarUpload}
+                disabled={saving}
+                className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 flex items-center justify-center gap-2"
               >
+                {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
                 Save
               </button>
               <button
-                onClick={() => setShowImageCrop(false)}
+                onClick={() => {
+                  setShowImageCrop(false);
+                  setSelectedImage(null);
+                }}
+                disabled={saving}
                 className="flex-1 px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300"
               >
                 Cancel

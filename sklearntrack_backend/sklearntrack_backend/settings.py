@@ -48,7 +48,8 @@ INSTALLED_APPS = [
     'django_celery_beat',
     
     # Local apps
-    'accounts',
+    'accounts.apps.AccountsConfig',      # ✅ First (User model)
+    'profiles.apps.ProfilesConfig',
     'courses',
     'notes',
     'roadmaps',

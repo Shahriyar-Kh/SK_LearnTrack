@@ -10,7 +10,17 @@ export const API_ENDPOINTS = {
   REGISTER: '/api/auth/register/',
   LOGOUT: '/api/auth/logout/',
   ME: '/api/auth/users/me/',
-  UPDATE_PROFILE: '/api/auth/users/update_profile/',
+ 
+    // Profile endpoints
+  PROFILE: '/api/profile/',
+  PROFILE_AVATAR: '/api/profile/avatar/',
+  PROFILE_DELETE_AVATAR: '/api/profile/delete-avatar/',
+  PROFILE_PREFERENCES: '/api/profile/preferences/',
+  PROFILE_NOTIFICATIONS: '/api/profile/notifications/',
+  PROFILE_CHANGE_PASSWORD: '/api/profile/change-password/',
+  PROFILE_ACTIVITY: '/api/profile/activity/',
+  PROFILE_ACTIVITY_LOG: '/api/profile/activity-log/',
+
   
   // Courses
   COURSES: '/api/courses/',
