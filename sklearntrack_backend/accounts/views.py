@@ -504,78 +504,78 @@ class AuthViewSet(viewsets.GenericViewSet):
             )
             return user, True
     
-def _send_password_reset_email(self, user, token):
+    def _send_password_reset_email(self, user, token):
+        """
+        Send password reset email with timeout
+        """
+        frontend_url = settings.FRONTEND_URL
+        reset_url = f"{frontend_url}/reset-password?token={token}"
+        
+        subject = 'Reset Your SK-LearnTrack Password'
+        message = f"""Hello {user.full_name or user.email},
+
+    You requested to reset your password for your SK-LearnTrack account.
+
+    Click the link below to set a new password (valid for 1 hour):
+    {reset_url}
+
+    If you did not request this password reset, please ignore this email.
+    Your account security is important to us.
+
+    Best regards,
+    SK-LearnTrack Team
     """
-    Send password reset email with timeout
+        
+        # Use async email sending with timeout
+        send_email_with_timeout(
+            subject=subject,
+            message=message,
+            from_email=settings.DEFAULT_FROM_EMAIL,
+            recipient_list=[user.email],
+            timeout=5
+        )
+
+    def _send_verification_email(self, user, request):
+        """
+        Send email verification link with timeout
+        """
+        # Create verification token (expires in 7 days)
+        token = str(uuid.uuid4())
+        expires_at = timezone.now() + timedelta(days=7)
+        
+        EmailVerification.objects.create(
+            user=user,
+            token=token,
+            expires_at=expires_at
+        )
+        
+        # Build verification URL
+        frontend_url = settings.FRONTEND_URL
+        verification_url = f"{frontend_url}/verify-email?token={token}"
+        
+        subject = 'Verify Your SK-LearnTrack Account'
+        message = f"""Welcome to SK-LearnTrack!
+
+    Please verify your email address by clicking the link below:
+    {verification_url}
+
+    This link will expire in 7 days.
+
+    If you did not create an account, please ignore this email.
+
+    Thank you,
+    SK-LearnTrack Team
     """
-    frontend_url = settings.FRONTEND_URL
-    reset_url = f"{frontend_url}/reset-password?token={token}"
-    
-    subject = 'Reset Your SK-LearnTrack Password'
-    message = f"""Hello {user.full_name or user.email},
-
-You requested to reset your password for your SK-LearnTrack account.
-
-Click the link below to set a new password (valid for 1 hour):
-{reset_url}
-
-If you did not request this password reset, please ignore this email.
-Your account security is important to us.
-
-Best regards,
-SK-LearnTrack Team
-"""
-    
-    # Use async email sending with timeout
-    send_email_with_timeout(
-        subject=subject,
-        message=message,
-        from_email=settings.DEFAULT_FROM_EMAIL,
-        recipient_list=[user.email],
-        timeout=5
-    )
-
-def _send_verification_email(self, user, request):
-    """
-    Send email verification link with timeout
-    """
-    # Create verification token (expires in 7 days)
-    token = str(uuid.uuid4())
-    expires_at = timezone.now() + timedelta(days=7)
-    
-    EmailVerification.objects.create(
-        user=user,
-        token=token,
-        expires_at=expires_at
-    )
-    
-    # Build verification URL
-    frontend_url = settings.FRONTEND_URL
-    verification_url = f"{frontend_url}/verify-email?token={token}"
-    
-    subject = 'Verify Your SK-LearnTrack Account'
-    message = f"""Welcome to SK-LearnTrack!
-
-Please verify your email address by clicking the link below:
-{verification_url}
-
-This link will expire in 7 days.
-
-If you did not create an account, please ignore this email.
-
-Thank you,
-SK-LearnTrack Team
-"""
-    
-    # Use async email sending with timeout
-    send_email_with_timeout(
-        subject=subject,
-        message=message,
-        from_email=settings.DEFAULT_FROM_EMAIL,
-        recipient_list=[user.email],
-        timeout=5
-    )
-    
+        
+        # Use async email sending with timeout
+        send_email_with_timeout(
+            subject=subject,
+            message=message,
+            from_email=settings.DEFAULT_FROM_EMAIL,
+            recipient_list=[user.email],
+            timeout=5
+        )
+        
     def _track_login_activity(self, request, user):
         """
         Record user login activity for security monitoring.
