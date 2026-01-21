@@ -1,11 +1,13 @@
-# FILE: accounts/serializers.py - FIXED WITH BETTER ERROR MESSAGES
+# FILE: accounts/serializers.py - UPDATED VERSION
+# ============================================================================
+# Works with separate profiles app
 # ============================================================================
 
 from rest_framework import serializers
 from django.contrib.auth import get_user_model, authenticate
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError as DjangoValidationError
-from .models import Profile, LoginActivity
+from .models import LoginActivity
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 import logging
 
@@ -90,23 +92,34 @@ class UserRegistrationSerializer(serializers.ModelSerializer):
         return user
 
 
-class ProfileSerializer(serializers.ModelSerializer):
-    """Serializer for user profile"""
+class BasicProfileSerializer(serializers.Serializer):
+    """
+    Basic profile data for inclusion in User serializer
+    References the separate profiles.Profile model
+    """
+    avatar = serializers.SerializerMethodField()
+    bio = serializers.CharField(read_only=True)
+    total_study_days = serializers.IntegerField(read_only=True)
+    current_streak = serializers.IntegerField(read_only=True)
+    longest_streak = serializers.IntegerField(read_only=True)
+    total_notes = serializers.IntegerField(read_only=True)
     
-    class Meta:
-        model = Profile
-        fields = [
-            'avatar', 'bio', 'skill_interests',
-            'email_notifications', 'weekly_summary', 'course_reminders',
-            'total_study_days', 'current_streak', 'longest_streak', 'total_notes'
-        ]
-        read_only_fields = ['total_study_days', 'current_streak', 'longest_streak', 'total_notes']
+    def get_avatar(self, obj):
+        if obj.avatar:
+            request = self.context.get('request')
+            if request:
+                return request.build_absolute_uri(obj.avatar.url)
+            return obj.avatar.url
+        return None
 
 
 class UserSerializer(serializers.ModelSerializer):
-    """Serializer for user details with role"""
+    """
+    Serializer for user details with role
+    Includes basic profile data from separate profiles app
+    """
     
-    profile = ProfileSerializer(read_only=True)
+    profile = serializers.SerializerMethodField()
     
     class Meta:
         model = User
@@ -121,6 +134,12 @@ class UserSerializer(serializers.ModelSerializer):
             'id', 'email_verified', 'created_at', 'username', 
             'role', 'is_staff', 'is_superuser'
         ]
+    
+    def get_profile(self, obj):
+        """Get profile data if exists"""
+        if hasattr(obj, 'profile'):
+            return BasicProfileSerializer(obj.profile, context=self.context).data
+        return None
 
 
 class LoginActivitySerializer(serializers.ModelSerializer):
@@ -128,15 +147,12 @@ class LoginActivitySerializer(serializers.ModelSerializer):
     
     class Meta:
         model = LoginActivity
-        fields = ['ip_address', 'user_agent', 'login_at', 'location']
+        fields = ['ip_address', 'user_agent', 'login_at', 'location', 'device_type']
 
 
 class EmailTokenObtainPairSerializer(TokenObtainPairSerializer):
     """
-    ✅ FIXED: Custom JWT serializer with better error messages
-    - Distinguishes between "email not found" vs "wrong password"
-    - Provides clear, specific error messages
-    - Prevents timing attacks with consistent response times
+    Custom JWT serializer with better error messages
     """
     
     username_field = 'email'
@@ -161,12 +177,7 @@ class EmailTokenObtainPairSerializer(TokenObtainPairSerializer):
         return token
     
     def validate(self, attrs):
-        """
-        ✅ FIXED: Validate and authenticate user with specific error messages
-        - Check if email exists first
-        - Then check password
-        - Provide specific error messages for each case
-        """
+        """Validate and authenticate user with specific error messages"""
         email = attrs.get('email', '').lower().strip()
         password = attrs.get('password')
         
@@ -175,18 +186,17 @@ class EmailTokenObtainPairSerializer(TokenObtainPairSerializer):
                 'detail': 'Email and password are required.'
             })
         
-        # ✅ FIX 1: Check if user exists
+        # Check if user exists
         try:
             user = User.objects.get(email=email)
         except User.DoesNotExist:
             logger.warning(f"Login attempt with non-existent email: {email}")
-            # ✅ Specific error for email not registered
             raise serializers.ValidationError({
                 'detail': 'This email is not registered. Please sign up first.',
                 'error_type': 'email_not_found'
             })
         
-        # ✅ FIX 2: Check if user is active
+        # Check if user is active
         if not user.is_active:
             logger.warning(f"Login attempt for disabled account: {email}")
             raise serializers.ValidationError({
@@ -194,7 +204,7 @@ class EmailTokenObtainPairSerializer(TokenObtainPairSerializer):
                 'error_type': 'account_disabled'
             })
         
-        # ✅ FIX 3: Authenticate with password
+        # Authenticate with password
         authenticated_user = authenticate(
             request=self.context.get('request'),
             email=email,
@@ -203,13 +213,12 @@ class EmailTokenObtainPairSerializer(TokenObtainPairSerializer):
         
         if not authenticated_user:
             logger.warning(f"Failed login attempt for {email}: incorrect password")
-            # ✅ Specific error for wrong password
             raise serializers.ValidationError({
                 'detail': 'Incorrect password. Please try again.',
                 'error_type': 'incorrect_password'
             })
         
-        # ✅ Update last login
+        # Update last login
         from django.utils import timezone
         user.last_login_at = timezone.now()
         user.save(update_fields=['last_login_at'])
@@ -220,7 +229,7 @@ class EmailTokenObtainPairSerializer(TokenObtainPairSerializer):
         data = {
             'refresh': str(refresh),
             'access': str(refresh.access_token),
-            'user': UserSerializer(user).data,
+            'user': UserSerializer(user, context=self.context).data,
             'redirect': self.get_redirect_url(user)
         }
         
@@ -270,7 +279,7 @@ class PasswordResetConfirmSerializer(serializers.Serializer):
 
 
 class ProfileUpdateSerializer(serializers.ModelSerializer):
-    """Serializer for updating profile after OAuth"""
+    """Serializer for updating basic user info (not full profile)"""
     
     class Meta:
         model = User

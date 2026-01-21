@@ -25,9 +25,9 @@ from datetime import timedelta
 import socket  # ADD THIS IMPORT
 import urllib.parse  # ADD THIS IMPORT
 
-from .models import Profile, LoginActivity, PasswordReset, EmailVerification
+from .models import LoginActivity, PasswordReset, EmailVerification
 from .serializers import (
-    UserRegistrationSerializer, UserSerializer, ProfileSerializer,
+    UserRegistrationSerializer, UserSerializer,
     LoginActivitySerializer, EmailTokenObtainPairSerializer,
     PasswordResetRequestSerializer, PasswordResetConfirmSerializer,
     GoogleAuthSerializer, ProfileUpdateSerializer
@@ -639,18 +639,6 @@ class UserViewSet(viewsets.ModelViewSet):
         return Response(serializer.data)
     
     
-    @action(detail=False, methods=['put', 'patch'])
-    def update_profile(self, request):
-        """Update user profile"""
-        profile = request.user.profile
-        serializer = ProfileSerializer(profile, data=request.data, partial=True)
-        
-        if serializer.is_valid():
-            serializer.save()
-            return Response(serializer.data)
-        
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-    
     @action(detail=False, methods=['post'])
     def change_password(self, request):
         """Change user password"""
@@ -703,8 +691,6 @@ class UserViewSet(viewsets.ModelViewSet):
         }
         
         return Response(summary)
-
-
 class EmailTokenObtainPairView(TokenObtainPairView):
     """Custom JWT view using email-based authentication"""
     serializer_class = EmailTokenObtainPairSerializer

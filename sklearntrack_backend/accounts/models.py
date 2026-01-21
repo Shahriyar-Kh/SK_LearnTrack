@@ -1,4 +1,6 @@
-# FILE: accounts/models.py - ENHANCED VERSION
+# FILE: accounts/models.py - CLEANED VERSION (Profile removed)
+# ============================================================================
+# Profile logic is now in separate 'profiles' app for better separation of concerns
 # ============================================================================
 
 from django.contrib.auth.models import AbstractUser, BaseUserManager
@@ -67,7 +69,12 @@ class CustomUserManager(BaseUserManager):
 
 
 class User(AbstractUser):
-    """Custom User model with email as primary identifier"""
+    """
+    Custom User model with email as primary identifier
+    
+    Note: Profile data is stored in separate 'profiles.Profile' model
+    via OneToOne relationship for better separation of concerns.
+    """
     
     ROLE_CHOICES = [
         ('student', 'Student'),
@@ -90,7 +97,7 @@ class User(AbstractUser):
     USERNAME_FIELD = 'email'
     REQUIRED_FIELDS = []  # Made flexible for Google OAuth
     
-    # Custom fields
+    # User Role & Basic Info
     role = models.CharField(max_length=20, choices=ROLE_CHOICES, default='student')
     full_name = models.CharField(max_length=255, blank=True)
     country = models.CharField(max_length=100, blank=True)
@@ -100,13 +107,14 @@ class User(AbstractUser):
         blank=True
     )
     field_of_study = models.CharField(max_length=255, blank=True)
+    
+    # Learning Preferences (kept in User for registration convenience)
     learning_goal = models.TextField(blank=True)
     preferred_study_hours = models.IntegerField(default=2)
     timezone = models.CharField(max_length=50, default='UTC')
     
     # OAuth fields
     google_id = models.CharField(max_length=255, blank=True, null=True, unique=True)
-
     
     # Account status
     email_verified = models.BooleanField(default=False)
@@ -145,50 +153,15 @@ class User(AbstractUser):
         # Set role to admin if user is staff or superuser
         if self.is_staff or self.is_superuser:
             self.role = 'admin'
-    
+        
         super().save(*args, **kwargs)
     
     def __str__(self):
         return self.email
 
 
-class Profile(models.Model):
-    """Extended profile information for users"""
-    
-    user = models.OneToOneField(
-        User, 
-        on_delete=models.CASCADE, 
-        related_name='profile'
-    )
-    avatar = models.ImageField(upload_to='avatars/', null=True, blank=True)
-    bio = models.TextField(blank=True)
-    skill_interests = models.JSONField(default=list)
-    
-    # Notification preferences
-    email_notifications = models.BooleanField(default=True)
-    weekly_summary = models.BooleanField(default=True)
-    course_reminders = models.BooleanField(default=True)
-    
-    # Statistics
-    total_study_days = models.IntegerField(default=0)
-    current_streak = models.IntegerField(default=0)
-    longest_streak = models.IntegerField(default=0)
-    total_notes = models.IntegerField(default=0)
-    
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
-    
-    class Meta:
-        db_table = 'profiles'
-        verbose_name = 'profile'
-        verbose_name_plural = 'profiles'
-    
-    def __str__(self):
-        return f"{self.user.email}'s Profile"
-
-
 class LoginActivity(models.Model):
-    """Track user login activities"""
+    """Track user login activities for security monitoring"""
     
     user = models.ForeignKey(
         User, 
