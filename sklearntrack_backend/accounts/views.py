@@ -239,18 +239,31 @@ class AuthViewSet(viewsets.GenericViewSet):
             }, status=status.HTTP_200_OK)
             
         except ValueError as e:
-            logger.warning(f"Google token validation failed: {str(e)}")
-            return Response({
-                'success': False,
-                'error': 'Invalid Google token',
-                'detail': str(e)
-            }, status=status.HTTP_400_BAD_REQUEST)
+            error_msg = str(e)
+            logger.warning(f"Google token validation failed: {error_msg}")
+            
+            # 🔒 SECURITY FIX: Do not expose client IDs in error messages
+            if "wrong audience" in error_msg.lower() or "audience" in error_msg.lower():
+                return Response({
+                    'success': False,
+                    'error': 'Invalid Google token',
+                    'detail': 'Google authentication failed. Please try again or use email login.',
+                    'error_type': 'google_auth_failed'
+                }, status=status.HTTP_400_BAD_REQUEST)
+            else:
+                return Response({
+                    'success': False,
+                    'error': 'Invalid Google token',
+                    'detail': 'Google authentication failed. Please try again.',
+                    'error_type': 'google_auth_failed'
+                }, status=status.HTTP_400_BAD_REQUEST)
         except Exception as e:
             logger.error(f"Google authentication failed: {str(e)}", exc_info=True)
             return Response({
                 'success': False,
                 'error': 'Google authentication failed',
-                'detail': 'Please try again'
+                'detail': 'Please try again',
+                'error_type': 'google_auth_error'
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
     
     # ==================== PASSWORD RESET ====================

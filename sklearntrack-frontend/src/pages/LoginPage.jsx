@@ -68,57 +68,64 @@ const LoginPage = () => {
     }
   }, []);
 
-  const handleGoogleResponse = async (response) => {
-    try {
-      setLoading(true);
-      setMessage({ type: '', text: '' });
-      
-      if (!response.credential) {
-        throw new Error('No credential received from Google');
-      }
-      
-      const res = await fetch(`${API_BASE_URL}/api/auth/google_auth/`, {
-        method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json',
-          'Accept': 'application/json',
-        },
-        body: JSON.stringify({ credential: response.credential }),
-      });
-      
-      const data = await res.json();
+const handleGoogleResponse = async (response) => {
+  try {
+    setLoading(true);
+    setMessage({ type: '', text: '' });
+    
+    if (!response.credential) {
+      throw new Error('No credential received from Google');
+    }
+    
+    const res = await fetch(`${API_BASE_URL}/api/auth/google_auth/`, {
+      method: 'POST',
+      headers: { 
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+      },
+      body: JSON.stringify({ credential: response.credential }),
+    });
+    
+    const data = await res.json();
 
-      if (!res.ok) {
+    if (!res.ok) {
+      // 🔒 SECURITY: Use error_type to show user-friendly messages
+      if (data.error_type === 'google_auth_failed' || data.error_type === 'google_auth_error') {
+        throw new Error(data.detail || 'Google authentication failed. Please try again.');
+      } else if (data.error_type === 'account_disabled') {
+        throw new Error('Your account has been disabled. Please contact support.');
+      } else {
         throw new Error(data.detail || data.error || 'Authentication failed');
       }
-
-      if (data.tokens) {
-        localStorage.setItem('accessToken', data.tokens.access);
-        localStorage.setItem('token', data.tokens.access);
-        localStorage.setItem('refreshToken', data.tokens.refresh);
-        localStorage.setItem('user', JSON.stringify(data.user));
-      }
-
-      setMessage({
-        type: 'success',
-        text: data.is_new_user ? 'Welcome! Account created successfully!' : 'Login successful!',
-      });
-
-      setTimeout(() => {
-        navigate(data.redirect || '/dashboard');
-      }, 1000);
-
-    } catch (error) {
-      console.error('[Google OAuth] Error:', error);
-      setMessage({
-        type: 'error',
-        text: error.message || 'Google authentication failed. Please try again.',
-      });
-    } finally {
-      setLoading(false);
     }
-  };
 
+    if (data.tokens) {
+      localStorage.setItem('accessToken', data.tokens.access);
+      localStorage.setItem('token', data.tokens.access);
+      localStorage.setItem('refreshToken', data.tokens.refresh);
+      localStorage.setItem('user', JSON.stringify(data.user));
+    }
+
+    setMessage({
+      type: 'success',
+      text: data.is_new_user ? 'Welcome! Account created successfully!' : 'Login successful!',
+    });
+
+    setTimeout(() => {
+      navigate(data.redirect || '/dashboard');
+    }, 1000);
+
+  } catch (error) {
+    console.error('[Google OAuth] Error:', error);
+    // 🔒 SECURITY: Never show raw error messages from backend
+    setMessage({
+      type: 'error',
+      text: error.message || 'Google authentication failed. Please try again or use email login.',
+    });
+  } finally {
+    setLoading(false);
+  }
+};
   // ✅ NEW: Email format validation
   const validateEmail = (email) => {
     if (!email) {
