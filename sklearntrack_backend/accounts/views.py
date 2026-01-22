@@ -629,8 +629,19 @@ SK-LearnTrack Team
         token['role'] = user.role
         token['full_name'] = user.full_name
         token['user_id'] = str(user.id)
-        if hasattr(user, 'profile'):
-            token['profile_complete'] = user.profile.is_complete()
+        
+        # ✅ FIXED: Safe profile completeness check
+        profile_complete = False
+        try:
+            if hasattr(user, 'profile') and user.profile:
+                # Check if profile has an avatar (simple completeness check)
+                if hasattr(user.profile, 'avatar'):
+                    profile_complete = bool(user.profile.avatar)
+        except Exception as e:
+            # Log but don't crash
+            logger.debug(f"Profile completeness check failed for {user.email}: {str(e)}")
+        
+        token['profile_complete'] = profile_complete
 
 class UserViewSet(viewsets.ModelViewSet):
     """User management endpoints"""
