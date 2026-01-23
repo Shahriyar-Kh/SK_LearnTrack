@@ -32,3 +32,21 @@ def auth_client(user):
     client = APIClient()
     client.force_authenticate(user=user)
     return client
+
+
+@pytest.fixture
+def admin_user(db):
+    """Admin user with staff permissions"""
+    return User.objects.create_superuser(
+        email='admin@example.com',
+        password='AdminPass123!',
+        full_name='Admin User'
+    )
+
+
+@pytest.fixture
+def admin_client(admin_user):
+    """Authenticated API client for admin actions"""
+    client = APIClient()
+    client.force_authenticate(user=admin_user)
+    return client

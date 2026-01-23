@@ -21,10 +21,13 @@ import TermsOfService from './pages/TermsOfService';
 import ForgotPasswordPage from './pages/ForgotPasswordPage';
 import ResetPasswordPage from './pages/ResetPasswordPage';
 import DashboardPage from '@/pages/User_DashboardPage';
-// Import other user pages as needed
 
 // Admin Pages
 import AdminDashboard from '@/pages/Admin_Dashboard';
+import { CourseListPage } from './components/admin/CourseListPage';
+import { CourseBuilder } from './components/admin/CourseBuilder';
+import { CourseCreatePage } from './components/admin/CourseCreatePage';
+import { AdminLayout } from './components/admin/AdminLayout';
 
 // guards
 import ProtectedRoute from '@/components/guards/ProtectedRoute';
@@ -88,10 +91,37 @@ function App() {
           </ProtectedRoute>
         } />
 
-         {/* Admin Dashboard - Admin role only */}
-        <Route path="/admin-dashboard" element={
+        {/* Admin Dashboard - Admin role only */}
+        <Route path="/admin" element={
           <AdminRoute>
-            <AdminDashboard />
+            <AdminLayout>
+              <AdminDashboard />
+            </AdminLayout>
+          </AdminRoute>
+        } />
+
+        {/* Admin Course Management */}
+        <Route path="/admin/courses" element={
+          <AdminRoute>
+            <AdminLayout>
+              <CourseListPage />
+            </AdminLayout>
+          </AdminRoute>
+        } />
+
+        <Route path="/admin/courses/create" element={
+          <AdminRoute>
+            <AdminLayout>
+              <CourseCreatePage />
+            </AdminLayout>
+          </AdminRoute>
+        } />
+
+        <Route path="/admin/courses/:courseId" element={
+          <AdminRoute>
+            <AdminLayout>
+              <CourseBuilder />
+            </AdminLayout>
           </AdminRoute>
         } />
 

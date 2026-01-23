@@ -5,7 +5,7 @@ from datetime import timedelta
 from django.db import models
 from django.conf import settings
 from django.utils.text import slugify
-from courses.models import Course, Topic as CourseTopic, Subtopic
+from courses.models import Course, CourseTopic
 # Add after imports, before model definitions
 from django.db import models
 from django.db.models import Q
@@ -59,10 +59,11 @@ class Note(models.Model):
         blank=True
     )
     course_subtopic = models.ForeignKey(
-        Subtopic, 
+        CourseTopic,
         on_delete=models.SET_NULL, 
         null=True, 
-        blank=True
+        blank=True,
+        related_name='subtopic_notes'
     )
     
     # Timestamps

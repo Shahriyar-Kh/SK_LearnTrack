@@ -3,51 +3,45 @@
 
 from django.contrib import admin
 from .models import (
-    Course, Chapter, Topic, Subtopic, Exercise,
-    Enrollment, SubtopicProgress, PersonalCourse
+    Course, CourseChapter, CourseTopic, CourseEnrollment, TopicProgress
 )
 
 
-class ChapterInline(admin.TabularInline):
-    model = Chapter
+class CourseChapterInline(admin.TabularInline):
+    model = CourseChapter
     extra = 1
 
 
-class TopicInline(admin.TabularInline):
-    model = Topic
-    extra = 1
-
-
-class SubtopicInline(admin.TabularInline):
-    model = Subtopic
+class CourseTopicInline(admin.TabularInline):
+    model = CourseTopic
     extra = 1
 
 
 @admin.register(Course)
 class CourseAdmin(admin.ModelAdmin):
-    list_display = ['title', 'difficulty', 'estimated_duration', 'is_published', 'created_at']
-    list_filter = ['difficulty', 'is_published']
+    list_display = ['title', 'difficulty', 'estimated_hours', 'status', 'created_at']
+    list_filter = ['difficulty', 'status']
     search_fields = ['title', 'description']
     prepopulated_fields = {'slug': ('title',)}
-    inlines = [ChapterInline]
+    inlines = [CourseChapterInline]
 
 
-@admin.register(Chapter)
-class ChapterAdmin(admin.ModelAdmin):
-    list_display = ['title', 'course', 'order']
+@admin.register(CourseChapter)
+class CourseChapterAdmin(admin.ModelAdmin):
+    list_display = ['title', 'course', 'order_index']
     list_filter = ['course']
-    inlines = [TopicInline]
+    inlines = [CourseTopicInline]
 
 
-@admin.register(Topic)
-class TopicAdmin(admin.ModelAdmin):
-    list_display = ['title', 'chapter', 'order']
+@admin.register(CourseTopic)
+class CourseTopicAdmin(admin.ModelAdmin):
+    list_display = ['title', 'chapter', 'order_index']
     list_filter = ['chapter__course']
-    inlines = [SubtopicInline]
 
 
-@admin.register(Enrollment)
-class EnrollmentAdmin(admin.ModelAdmin):
-    list_display = ['user', 'course', 'progress_percentage', 'enrolled_at']
+@admin.register(CourseEnrollment)
+class CourseEnrollmentAdmin(admin.ModelAdmin):
+    list_display = ['student', 'course', 'progress_percentage', 'enrolled_at']
     list_filter = ['enrolled_at', 'course']
-    search_fields = ['user__email', 'course__title']
+    search_fields = ['student__email', 'course__title']
+

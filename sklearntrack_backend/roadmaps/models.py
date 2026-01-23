@@ -3,7 +3,7 @@
 
 from django.db import models
 from django.conf import settings
-from courses.models import Course, Topic
+from courses.models import Course, CourseTopic
 from notes.models import Note
 
 class Roadmap(models.Model):
@@ -59,7 +59,7 @@ class RoadmapTask(models.Model):
     
     # Optional links
     course = models.ForeignKey(Course, on_delete=models.SET_NULL, null=True, blank=True)
-    topic = models.ForeignKey(Topic, on_delete=models.SET_NULL, null=True, blank=True)
+    topic = models.ForeignKey(CourseTopic, on_delete=models.SET_NULL, null=True, blank=True)
     note = models.ForeignKey(Note, on_delete=models.SET_NULL, null=True, blank=True)
     
     due_date = models.DateField(null=True, blank=True)
