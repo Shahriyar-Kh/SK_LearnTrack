@@ -227,12 +227,14 @@ CORS_ALLOW_HEADERS = [
 CORS_PREFLIGHT_MAX_AGE = 86400
 
 
-# =============== EMAIL CONFIGURATION - COMPLETE FIX =================
-
+# =============== EMAIL CONFIGURATION - PRODUCTION FIX =================
 # Frontend URL for email links
 FRONTEND_URL = config('FRONTEND_URL', default='http://localhost:3000')
 
-# Get email configuration from environment
+# Email Configuration - Optimized for Production
+EMAIL_BACKEND = config('EMAIL_BACKEND', default='django.core.mail.backends.smtp.EmailBackend')
+
+# Get all email configuration
 EMAIL_HOST = config('EMAIL_HOST', default='')
 EMAIL_HOST_USER = config('EMAIL_HOST_USER', default='')
 EMAIL_HOST_PASSWORD = config('EMAIL_HOST_PASSWORD', default='')
@@ -240,51 +242,59 @@ EMAIL_PORT = config('EMAIL_PORT', default=587, cast=int)
 EMAIL_USE_TLS = config('EMAIL_USE_TLS', default=True, cast=bool)
 EMAIL_USE_SSL = config('EMAIL_USE_SSL', default=False, cast=bool)
 EMAIL_TIMEOUT = 30  # 30 seconds timeout
+DEFAULT_FROM_EMAIL = config('DEFAULT_FROM_EMAIL', default=EMAIL_HOST_USER or 'noreply@sklearntrack.com')
 
-# ✅ FIX: Determine email backend based on credentials
-# Check if ALL required email credentials are present
-email_configured = bool(EMAIL_HOST and EMAIL_HOST_USER and EMAIL_HOST_PASSWORD)
+# Check for SendGrid (Render recommended)
+SENDGRID_API_KEY = config('SENDGRID_API_KEY', default='')
+MAILGUN_API_KEY = config('MAILGUN_API_KEY', default='')
 
-if email_configured:
-    # ✅ Email credentials are present - use SMTP
+# 🔥 FIX: Use SendGrid if available (Render's recommended email service)
+if SENDGRID_API_KEY and not DEBUG:
+    # SendGrid configuration for Render
     EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
-    DEFAULT_FROM_EMAIL = config('DEFAULT_FROM_EMAIL', default=EMAIL_HOST_USER)
-    SERVER_EMAIL = DEFAULT_FROM_EMAIL
+    EMAIL_HOST = 'smtp.sendgrid.net'
+    EMAIL_PORT = 587
+    EMAIL_USE_TLS = True
+    EMAIL_HOST_USER = 'apikey'  # This is fixed for SendGrid
+    EMAIL_HOST_PASSWORD = SENDGRID_API_KEY
     
     logger.info("=" * 60)
-    logger.info("✅ EMAIL CONFIGURATION: SMTP Backend Active")
+    logger.info("✅ EMAIL CONFIGURATION: SendGrid SMTP (Production)")
+    logger.info("   Provider: SendGrid")
     logger.info(f"   Host: {EMAIL_HOST}")
     logger.info(f"   Port: {EMAIL_PORT}")
-    logger.info(f"   User: {EMAIL_HOST_USER}")
-    logger.info(f"   TLS: {EMAIL_USE_TLS}")
-    logger.info(f"   SSL: {EMAIL_USE_SSL}")
-    logger.info(f"   From: {DEFAULT_FROM_EMAIL}")
     logger.info("=" * 60)
+
+
 else:
-    # ❌ Missing credentials - use console backend
-    EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
-    DEFAULT_FROM_EMAIL = 'webmaster@localhost'
-    
-    logger.warning("=" * 60)
-    logger.warning("⚠️  EMAIL CONFIGURATION: Console Backend (Development Mode)")
-    logger.warning("   Emails will be printed to console, not sent!")
-    logger.warning("")
-    logger.warning("   Missing configuration:")
-    if not EMAIL_HOST:
-        logger.warning("   ❌ EMAIL_HOST not set")
-    if not EMAIL_HOST_USER:
-        logger.warning("   ❌ EMAIL_HOST_USER not set")
-    if not EMAIL_HOST_PASSWORD:
-        logger.warning("   ❌ EMAIL_HOST_PASSWORD not set")
-    logger.warning("")
-    logger.warning("   To enable email sending, set these environment variables:")
-    logger.warning("   1. EMAIL_HOST=smtp.gmail.com")
-    logger.warning("   2. EMAIL_HOST_USER=your-email@gmail.com")
-    logger.warning("   3. EMAIL_HOST_PASSWORD=your-app-password")
-    logger.warning("=" * 60)
+    # Development/fallback configuration
+    if DEBUG:
+        EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
+        logger.warning("⚠️  EMAIL: Console backend (Development Mode)")
+    else:
+        # In production without email config, use dummy backend but log warnings
+        EMAIL_BACKEND = 'django.core.mail.backends.dummy.EmailBackend'
+        logger.error("❌ EMAIL CONFIGURATION: No email provider configured!")
+        logger.error("   Emails will NOT be sent in production!")
+        logger.error("")
+        logger.error("   Configure one of these in Render environment:")
+        logger.error("   1. SENDGRID_API_KEY (Recommended for Render)")
+        logger.error("   2. MAILGUN_API_KEY")
+        logger.error("   3. Standard SMTP (EMAIL_HOST, EMAIL_HOST_USER, EMAIL_HOST_PASSWORD)")
+        logger.error("=" * 60)
 
 # Email subject prefix
 EMAIL_SUBJECT_PREFIX = '[SK-LearnTrack] '
+
+# Connection pooling for better performance
+EMAIL_CONNECTION_TIMEOUT = 10  # Reduced from 30s
+EMAIL_SSL_KEYFILE = None
+EMAIL_SSL_CERTFILE = None
+
+# Email retry configuration
+MAX_EMAIL_RETRIES = 3
+EMAIL_RETRY_DELAY = 2  # seconds
+
 
 # =============== END EMAIL CONFIGURATION =================
 # # Celery Configuration
@@ -449,6 +459,60 @@ logger.info(f"   Backend URL: {BACKEND_URL}")
 logger.info(f"   Frontend URL: {FRONTEND_URL}")
 logger.info(f"   Drive Redirect: {GOOGLE_DRIVE_REDIRECT_URI}")
 logger.info("=" * 60)
+
+# ============================================================================
+# GOOGLE OAUTH VALIDATION - PRODUCTION FIX
+# ============================================================================
+
+# Google OAuth - MUST be configured in production
+GOOGLE_OAUTH_CLIENT_ID = config('GOOGLE_OAUTH_CLIENT_ID', default='')
+GOOGLE_OAUTH_CLIENT_SECRET = config('GOOGLE_OAUTH_CLIENT_SECRET', default='')
+
+# Validate Google OAuth configuration
+GOOGLE_OAUTH_CONFIGURED = bool(GOOGLE_OAUTH_CLIENT_ID and GOOGLE_OAUTH_CLIENT_SECRET)
+
+if GOOGLE_OAUTH_CONFIGURED:
+    # Validate client ID format
+    if not GOOGLE_OAUTH_CLIENT_ID.endswith('.apps.googleusercontent.com'):
+        logger.error(f"❌ Invalid Google OAuth Client ID format: {GOOGLE_OAUTH_CLIENT_ID}")
+        logger.error("   Client ID must end with '.apps.googleusercontent.com'")
+        GOOGLE_OAUTH_CONFIGURED = False
+    
+    # Log configuration (masked)
+    logger.info("=" * 60)
+    logger.info("✅ GOOGLE OAUTH CONFIGURATION - PRODUCTION")
+    logger.info(f"   Client ID: {GOOGLE_OAUTH_CLIENT_ID[:10]}...{GOOGLE_OAUTH_CLIENT_ID[-10:]}")
+    logger.info(f"   Client Secret configured: {'Yes' if GOOGLE_OAUTH_CLIENT_SECRET else 'No'}")
+    logger.info(f"   Client ID length: {len(GOOGLE_OAUTH_CLIENT_ID)}")
+    logger.info(f"   Is valid format: {GOOGLE_OAUTH_CLIENT_ID.endswith('.apps.googleusercontent.com')}")
+    logger.info("=" * 60)
+else:
+    logger.warning("=" * 60)
+    logger.warning("⚠️  GOOGLE OAUTH NOT CONFIGURED")
+    logger.warning("   Google Drive integration will not work!")
+    logger.warning("")
+    logger.warning("   Set these environment variables in Render:")
+    logger.warning("   1. GOOGLE_OAUTH_CLIENT_ID")
+    logger.warning("   2. GOOGLE_OAUTH_CLIENT_SECRET")
+    logger.warning("   3. BACKEND_URL (should be: https://sk-learntrack-pkw6.onrender.com)")
+    logger.warning("=" * 60)
+
+# Backend URL for OAuth callbacks - MUST be set in production
+BACKEND_URL = config('BACKEND_URL', default='')
+if not BACKEND_URL:
+    if DEBUG:
+        BACKEND_URL = 'http://localhost:8000'
+    else:
+        # Default for Render
+        BACKEND_URL = 'https://sk-learntrack-pkw6.onrender.com'
+        logger.warning(f"⚠️ BACKEND_URL not set, using default: {BACKEND_URL}")
+
+logger.info(f"🔐 Backend URL: {BACKEND_URL}")
+logger.info(f"🔐 Google OAuth Configured: {GOOGLE_OAUTH_CONFIGURED}")
+
+# Google Drive OAuth Redirect URI (explicit)
+GOOGLE_DRIVE_REDIRECT_URI = f"{BACKEND_URL}/api/notes/google-callback/"
+logger.info(f"🔐 Google Drive Redirect URI: {GOOGLE_DRIVE_REDIRECT_URI}")
 
 # ============================================================================
 # PRODUCTION FIXES FOR RENDER
