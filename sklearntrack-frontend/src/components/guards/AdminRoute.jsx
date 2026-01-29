@@ -28,6 +28,7 @@ const AdminRoute = ({ children }) => {
 
     if (!isAdmin) {
       // Not an admin - redirect to user dashboard
+      console.warn('Non-admin user attempted to access admin page');
       return <Navigate to="/dashboard" replace />;
     }
 

@@ -13,6 +13,12 @@ const Navbar = () => {
   const dispatch = useDispatch();
   const navigate = useNavigate();
 
+  // This navbar is for regular users only
+  const isAdmin = user?.role === 'admin' || user?.is_staff || user?.is_superuser;
+  if (isAdmin) {
+    return null; // Admins use AdminLayout navbar instead
+  }
+
   const handleLogout = async () => {
     await dispatch(logout());
     toast.success('Logged out successfully');

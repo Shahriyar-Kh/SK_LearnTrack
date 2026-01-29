@@ -1,5 +1,5 @@
 // courseAdminService.js - Admin Course Management API Service
-import { api } from './api'
+import api from './api'
 
 export const courseAdminService = {
   // ============================================================================
@@ -11,7 +11,7 @@ export const courseAdminService = {
    * @param {Object} params - Query parameters (status, category, search, page)
    */
   async getCourses(params = {}) {
-    const response = await api.get('/courses/admin/courses/', { params })
+    const response = await api.get('/api/courses/admin/courses/', { params })
     return response.data
   },
 
@@ -20,7 +20,7 @@ export const courseAdminService = {
    * @param {number} courseId - Course ID
    */
   async getCourse(courseId) {
-    const response = await api.get(`/courses/admin/courses/${courseId}/`)
+    const response = await api.get(`/api/courses/admin/courses/${courseId}/`)
     return response.data
   },
 
@@ -29,7 +29,7 @@ export const courseAdminService = {
    * @param {Object} courseData - Course metadata
    */
   async createCourse(courseData) {
-    const response = await api.post('/courses/admin/courses/', courseData)
+    const response = await api.post('/api/courses/admin/courses/', courseData)
     return response.data
   },
 
@@ -39,7 +39,7 @@ export const courseAdminService = {
    * @param {Object} courseData - Updated data
    */
   async updateCourse(courseId, courseData) {
-    const response = await api.patch(`/courses/admin/courses/${courseId}/`, courseData)
+    const response = await api.patch(`/api/courses/admin/courses/${courseId}/`, courseData)
     return response.data
   },
 
@@ -48,7 +48,7 @@ export const courseAdminService = {
    * @param {number} courseId - Course ID
    */
   async deleteCourse(courseId) {
-    await api.delete(`/courses/admin/courses/${courseId}/`)
+    await api.delete(`/api/courses/admin/courses/${courseId}/`)
   },
 
   /**
@@ -57,7 +57,7 @@ export const courseAdminService = {
    * @param {string} changeSummary - What changed
    */
   async publishCourse(courseId, changeSummary = 'Course published') {
-    const response = await api.post(`/courses/admin/courses/${courseId}/publish/`, {
+    const response = await api.post(`/api/courses/admin/courses/${courseId}/publish/`, {
       change_summary: changeSummary
     })
     return response.data
@@ -68,7 +68,7 @@ export const courseAdminService = {
    * @param {number} courseId - Course ID
    */
   async unpublishCourse(courseId) {
-    const response = await api.post(`/courses/admin/courses/${courseId}/unpublish/`, {})
+    const response = await api.post(`/api/courses/admin/courses/${courseId}/unpublish/`, {})
     return response.data
   },
 
@@ -77,7 +77,7 @@ export const courseAdminService = {
    * @param {number} courseId - Course ID
    */
   async previewCourse(courseId) {
-    const response = await api.get(`/courses/admin/courses/${courseId}/preview/`)
+    const response = await api.get(`/api/courses/admin/courses/${courseId}/preview/`)
     return response.data
   },
 
@@ -87,7 +87,7 @@ export const courseAdminService = {
    * @param {string} newTitle - Title for duplicate
    */
   async duplicateCourse(courseId, newTitle) {
-    const response = await api.post(`/courses/admin/courses/${courseId}/duplicate/`, {
+    const response = await api.post(`/api/courses/admin/courses/${courseId}/duplicate/`, {
       title: newTitle
     })
     return response.data
@@ -98,7 +98,7 @@ export const courseAdminService = {
    * @param {number} courseId - Course ID
    */
   async getVersionHistory(courseId) {
-    const response = await api.get(`/courses/admin/courses/${courseId}/version-history/`)
+    const response = await api.get(`/api/courses/admin/courses/${courseId}/version-history/`)
     return response.data
   },
 
@@ -107,7 +107,7 @@ export const courseAdminService = {
    * @param {number} courseId - Course ID
    */
   async getAuditLog(courseId) {
-    const response = await api.get(`/courses/admin/courses/${courseId}/audit-log/`)
+    const response = await api.get(`/api/courses/admin/courses/${courseId}/audit-log/`)
     return response.data
   },
 
@@ -122,7 +122,7 @@ export const courseAdminService = {
    */
   async createChapter(courseId, chapterData) {
     const response = await api.post(
-      `/courses/admin/courses/${courseId}/chapters/`,
+      `/api/courses/admin/courses/${courseId}/chapters/`,
       chapterData
     )
     return response.data
@@ -136,7 +136,7 @@ export const courseAdminService = {
    */
   async updateChapter(courseId, chapterId, chapterData) {
     const response = await api.patch(
-      `/courses/admin/courses/${courseId}/chapters/${chapterId}/`,
+      `/api/courses/admin/courses/${courseId}/chapters/${chapterId}/`,
       chapterData
     )
     return response.data
@@ -148,7 +148,7 @@ export const courseAdminService = {
    * @param {number} chapterId - Chapter ID
    */
   async deleteChapter(courseId, chapterId) {
-    await api.delete(`/courses/admin/courses/${courseId}/chapters/${chapterId}/`)
+    await api.delete(`/api/courses/admin/courses/${courseId}/chapters/${chapterId}/`)
   },
 
   // ============================================================================
@@ -163,7 +163,7 @@ export const courseAdminService = {
    */
   async createTopic(courseId, chapterId, topicData) {
     const response = await api.post(
-      `/courses/admin/courses/${courseId}/chapters/${chapterId}/topics/`,
+      `/api/courses/admin/courses/${courseId}/chapters/${chapterId}/topics/`,
       topicData
     )
     return response.data
@@ -178,7 +178,7 @@ export const courseAdminService = {
    */
   async updateTopic(courseId, chapterId, topicId, topicData) {
     const response = await api.patch(
-      `/courses/admin/courses/${courseId}/chapters/${chapterId}/topics/${topicId}/`,
+      `/api/courses/admin/courses/${courseId}/chapters/${chapterId}/topics/${topicId}/`,
       topicData
     )
     return response.data
@@ -192,7 +192,7 @@ export const courseAdminService = {
    */
   async deleteTopic(courseId, chapterId, topicId) {
     await api.delete(
-      `/courses/admin/courses/${courseId}/chapters/${chapterId}/topics/${topicId}/`
+      `/api/courses/admin/courses/${courseId}/chapters/${chapterId}/topics/${topicId}/`
     )
   },
 
@@ -204,7 +204,7 @@ export const courseAdminService = {
    */
   async reorderTopics(courseId, chapterId, ordering) {
     const response = await api.post(
-      `/courses/admin/courses/${courseId}/chapters/${chapterId}/reorder/`,
+      `/api/courses/admin/courses/${courseId}/chapters/${chapterId}/reorder/`,
       { ordering }
     )
     return response.data
@@ -222,7 +222,7 @@ export const courseAdminService = {
    */
   async getTopicQuiz(courseId, chapterId, topicId) {
     const response = await api.get(
-      `/courses/admin/courses/${courseId}/chapters/${chapterId}/topics/${topicId}/quiz/`
+      `/api/courses/admin/courses/${courseId}/chapters/${chapterId}/topics/${topicId}/quiz/`
     )
     return response.data
   },
@@ -236,7 +236,7 @@ export const courseAdminService = {
    */
   async saveQuiz(courseId, chapterId, topicId, quizData) {
     const response = await api.post(
-      `/courses/admin/courses/${courseId}/chapters/${chapterId}/topics/${topicId}/quiz/`,
+      `/api/courses/admin/courses/${courseId}/chapters/${chapterId}/topics/${topicId}/quiz/`,
       quizData
     )
     return response.data

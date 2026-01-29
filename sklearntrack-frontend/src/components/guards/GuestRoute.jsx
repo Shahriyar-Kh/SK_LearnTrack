@@ -23,8 +23,9 @@ const GuestRoute = ({ children }) => {
     try {
       const user = JSON.parse(userStr);
       const isAdmin = user.role === 'admin' || user.is_staff || user.is_superuser;
-      
-      return <Navigate to={isAdmin ? '/admin-dashboard' : '/dashboard'} replace />;
+
+      // Redirect admins to the admin app entry point
+      return <Navigate to={isAdmin ? '/admin' : '/dashboard'} replace />;
     } catch (error) {
       console.error('Error parsing user data:', error);
       // If there's an error, show the page

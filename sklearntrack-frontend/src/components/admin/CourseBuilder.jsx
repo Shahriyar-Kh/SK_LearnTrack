@@ -1,7 +1,7 @@
 // CourseBuilder.jsx - 4-Column Course Builder with Drag-Drop Structure
 import React, { useState, useEffect } from 'react'
 import { useParams } from 'react-router-dom'
-import { Save, Publish, Eye, Copy, MoreVertical, Plus, AlertCircle } from 'lucide-react'
+import { Save, Send, Eye, Copy, MoreVertical, Plus, AlertCircle } from 'lucide-react'
 import { courseAdminService } from '../../services/courseAdminService'
 import { toast } from 'react-hot-toast'
 import { CourseMetadataPanel } from './panels/CourseMetadataPanel'
@@ -138,7 +138,7 @@ export function CourseBuilder() {
               disabled={publishing || course.status === 'published'}
               className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg transition-colors disabled:opacity-50"
             >
-              <Publish size={18} />
+              <Send size={18} />
               {publishing ? 'Publishing...' : 'Publish'}
             </button>
             <div className="relative">

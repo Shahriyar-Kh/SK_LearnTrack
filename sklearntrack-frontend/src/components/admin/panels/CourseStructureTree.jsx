@@ -37,6 +37,11 @@ export function CourseStructureTree({
         description: '',
         order_index: (course.chapters?.length || 0) + 1
       })
+      if (!chapter || !chapter.id) {
+        toast.error('Failed to create chapter: no ID returned')
+        console.error('Chapter response:', chapter)
+        return
+      }
       onCourseChange({
         ...course,
         chapters: [...(course.chapters || []), chapter]
@@ -44,24 +49,38 @@ export function CourseStructureTree({
       setNewChapterTitle('')
       setExpandedChapters(new Set([...expandedChapters, chapter.id]))
       toast.success('Chapter added')
-    } catch {
+    } catch (error) {
       toast.error('Failed to add chapter')
+      console.error('Add chapter error:', error)
     }
   }
 
   const addTopic = async (chapterId) => {
     if (!newTopicTitle.trim()) return
+    if (!chapterId) {
+      toast.error('Chapter ID is missing. Please select a chapter.')
+      return
+    }
     try {
-      const topic = await courseAdminService.createTopic(course.id, chapterId, {
+      const topicData = {
         title: newTopicTitle,
         description: '',
-        content: '',
+        content: 'Start adding content here...',
         estimated_minutes: 15,
         difficulty: 'beginner',
         key_concepts: [],
+        meta_title: newTopicTitle,
+        meta_description: '',
         order_index: course.chapters
           ?.find(c => c.id === chapterId)?.topics?.length || 1
-      })
+      }
+      console.log('Creating topic with data:', topicData, 'Course:', course.id, 'Chapter:', chapterId)
+      const topic = await courseAdminService.createTopic(course.id, chapterId, topicData)
+      if (!topic || !topic.id) {
+        toast.error('Failed to create topic: no ID returned')
+        console.error('Topic response:', topic)
+        return
+      }
       onCourseChange({
         ...course,
         chapters: course.chapters.map(c =>
@@ -74,8 +93,11 @@ export function CourseStructureTree({
       setNewTopicChapterId(null)
       onSelectTopic(topic.id)
       toast.success('Topic added')
-    } catch {
-      toast.error('Failed to add topic')
+    } catch (error) {
+      const errorData = error.response?.data || error.message || error;
+      toast.error(`Failed to add topic: ${JSON.stringify(errorData)}`)
+      console.error('Add topic error:', errorData)
+      console.error('Full error:', error)
     }
   }
 

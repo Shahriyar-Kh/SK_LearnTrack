@@ -2,7 +2,7 @@
 import React, { useState } from 'react'
 import { useLocation } from 'react-router-dom'
 import { Menu, X, LogOut, Settings } from 'lucide-react'
-import { Navbar } from '../layout/Navbar'
+import Navbar from '../layout/Navbar'
 
 export function AdminLayout({ children }) {
   const [sidebarOpen, setSidebarOpen] = useState(true)

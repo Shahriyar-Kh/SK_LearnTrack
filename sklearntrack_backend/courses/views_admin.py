@@ -80,6 +80,16 @@ class AdminCourseViewSet(viewsets.ModelViewSet):
             return CourseWriteSerializer
         return CourseDetailAdminSerializer
     
+    def create(self, request, *args, **kwargs):
+        """Override create to return full serialized data with ID and chapters"""
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        self.perform_create(serializer)
+        
+        # Return full serialized data including ID and all fields
+        output_serializer = CourseDetailAdminSerializer(serializer.instance)
+        return Response(output_serializer.data, status=status.HTTP_201_CREATED)
+    
     def perform_create(self, serializer):
         """Log course creation"""
         course = serializer.save(created_by=self.request.user)
@@ -430,11 +440,23 @@ class AdminChapterViewSet(viewsets.ModelViewSet):
         return CourseChapterAdminSerializer
     
     def get_queryset(self):
-        course_id = self.kwargs.get('course_id')
+        # Nested router uses 'course' as lookup, not 'course_id'
+        course_id = self.kwargs.get('course') or self.kwargs.get('course_id')
         return CourseChapter.objects.filter(course_id=course_id).order_by('order_index')
     
+    def create(self, request, *args, **kwargs):
+        """Override create to return full serialized data"""
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        self.perform_create(serializer)
+        
+        # Return full serialized data including ID
+        output_serializer = CourseChapterAdminSerializer(serializer.instance)
+        return Response(output_serializer.data, status=status.HTTP_201_CREATED)
+    
     def perform_create(self, serializer):
-        course_id = self.kwargs.get('course_id')
+        # Nested router uses 'course' as lookup, not 'course_id'
+        course_id = self.kwargs.get('course') or self.kwargs.get('course_id')
         course = get_object_or_404(Course, id=course_id)
         chapter = serializer.save(course=course)
         
@@ -497,11 +519,23 @@ class AdminTopicViewSet(viewsets.ModelViewSet):
         return CourseTopicAdminSerializer
     
     def get_queryset(self):
-        chapter_id = self.kwargs.get('chapter_id')
+        # Nested router uses 'chapter' as lookup, not 'chapter_id'
+        chapter_id = self.kwargs.get('chapter') or self.kwargs.get('chapter_id')
         return CourseTopic.objects.filter(chapter_id=chapter_id).order_by('order_index')
     
+    def create(self, request, *args, **kwargs):
+        """Override create to return full serialized data with ID"""
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        self.perform_create(serializer)
+        
+        # Return full serialized data including ID and all fields
+        output_serializer = CourseTopicAdminSerializer(serializer.instance)
+        return Response(output_serializer.data, status=status.HTTP_201_CREATED)
+    
     def perform_create(self, serializer):
-        chapter_id = self.kwargs.get('chapter_id')
+        # Nested router uses 'chapter' as lookup, not 'chapter_id'
+        chapter_id = self.kwargs.get('chapter') or self.kwargs.get('chapter_id')
         chapter = get_object_or_404(CourseChapter, id=chapter_id)
         topic = serializer.save(chapter=chapter)
         
