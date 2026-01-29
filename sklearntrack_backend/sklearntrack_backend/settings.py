@@ -433,12 +433,22 @@ if not GOOGLE_OAUTH_CLIENT_ID or GOOGLE_OAUTH_CLIENT_ID == 'your-google-client-i
 else:
     logger.info(f"Google OAuth configured with Client ID: {GOOGLE_OAUTH_CLIENT_ID[:20]}...")
 
-# Google OAuth Redirect URI (used for some OAuth flows)
-GOOGLE_OAUTH_REDIRECT_URI = config(
-    'GOOGLE_OAUTH_REDIRECT_URI', 
-    default='http://localhost:8000/auth/google/callback/'
-)
+# Backend URL for OAuth callbacks
+BACKEND_URL = config('BACKEND_URL', default='http://localhost:8000' if DEBUG else 'https://sk-learntrack-pkw6.onrender.com')
 
+# Frontend URL for redirects after OAuth
+FRONTEND_URL = config('FRONTEND_URL', default='http://localhost:3000' if DEBUG else 'https://sk-learntrack.vercel.app')
+
+# Google Drive OAuth Redirect URI (explicit)
+GOOGLE_DRIVE_REDIRECT_URI = f"{BACKEND_URL}/api/notes/google-callback/"
+
+# Log configuration
+logger.info("=" * 60)
+logger.info("🔐 OAUTH CONFIGURATION")
+logger.info(f"   Backend URL: {BACKEND_URL}")
+logger.info(f"   Frontend URL: {FRONTEND_URL}")
+logger.info(f"   Drive Redirect: {GOOGLE_DRIVE_REDIRECT_URI}")
+logger.info("=" * 60)
 
 # ============================================================================
 # PRODUCTION FIXES FOR RENDER

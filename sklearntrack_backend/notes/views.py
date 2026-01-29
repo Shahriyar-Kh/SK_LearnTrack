@@ -325,21 +325,39 @@ class NoteViewSet(viewsets.ModelViewSet):
             )
 
     def destroy(self, request, *args, **kwargs):
-        """Delete note using NoteService"""
+        """Delete note using NoteService - FIXED SQL"""
         note = self.get_object()
         note_title = note.title
         
         try:
             with transaction.atomic():
                 # Clear roadmap_tasks reference if table exists
-                with connection.cursor() as cursor:
-                    cursor.execute("""
-                        SELECT EXISTS (
-                            SELECT FROM information_schema.tables 
-                            WHERE table_name = 'roadmap_tasks'
-                        );
-                    """)
-                    if cursor.fetchone()[0]:
+                # FIXED: Use database-agnostic table check
+                from django.db import connection
+                
+                # Check if roadmap_tasks table exists
+                table_exists = False
+                if connection.vendor == 'postgresql':
+                    with connection.cursor() as cursor:
+                        cursor.execute("""
+                            SELECT EXISTS (
+                                SELECT FROM information_schema.tables 
+                                WHERE table_name = 'roadmap_tasks'
+                            );
+                        """)
+                        table_exists = cursor.fetchone()[0]
+                elif connection.vendor == 'sqlite':
+                    with connection.cursor() as cursor:
+                        cursor.execute("""
+                            SELECT name FROM sqlite_master 
+                            WHERE type='table' AND name='roadmap_tasks';
+                        """)
+                        table_exists = cursor.fetchone() is not None
+            
+                
+                # Clear reference if table exists
+                if table_exists:
+                    with connection.cursor() as cursor:
                         cursor.execute(
                             "UPDATE roadmap_tasks SET note_id = NULL WHERE note_id = %s;",
                             [note.id]
@@ -353,7 +371,7 @@ class NoteViewSet(viewsets.ModelViewSet):
                 'success': True
             })
         except Exception as e:
-            logger.error(f"Delete Error: {str(e)}")
+            logger.error(f"Delete Error: {str(e)}", exc_info=True)
             return Response({
                 'error': f'Failed to delete note: {str(e)}',
                 'success': False
@@ -487,9 +505,103 @@ class TopicViewSet(viewsets.ModelViewSet):
         return ChapterTopic.objects.filter(
             chapter__note__user=self.request.user
         ).select_related('explanation', 'code_snippet', 'source').order_by('order')
+
+   # In views.py - Update the ai_action_standalone method
+    @action(detail=False, methods=['post'], url_path='ai-action-standalone')
+    def ai_action_standalone(self, request):
+        """
+        AI action that works WITHOUT requiring a saved topic
+        Can be called before topic is created
+        """
+        action_type = request.data.get('action_type')
+        input_content = request.data.get('input_content', '').strip()
+        topic_name = request.data.get('topic_name', '').strip()
+        language = request.data.get('language', 'python')
+        level = request.data.get('level', 'beginner')  # ADD THIS LINE
+        subject_area = request.data.get('subject_area', 'programming')  # ADD THIS LINE
+        
+        # Validate input
+        if not action_type:
+            return Response(
+                {'error': 'action_type is required', 'success': False},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # For explanations, we need either input_content or topic_name
+        if action_type in ['generate_explanation', 'improve_explanation', 'summarize_explanation']:
+            if action_type == 'generate_explanation':
+                if not topic_name and not input_content:
+                    return Response(
+                        {'error': 'topic_name or input_content required for explanation', 'success': False},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+                content_to_use = topic_name or input_content
+            else:
+                if not input_content:
+                    return Response(
+                        {'error': 'input_content required for this action', 'success': False},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+                content_to_use = input_content
+        elif action_type == 'generate_code':
+            if not topic_name and not input_content:
+                return Response(
+                    {'error': 'topic_name or input_content required for code generation', 'success': False},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            content_to_use = topic_name or input_content
+        else:
+            return Response(
+                {'error': f'Unknown action_type: {action_type}', 'success': False},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        try:
+            generated_content = None
+            
+            if action_type == 'generate_explanation':
+                # PASS LEVEL AND SUBJECT_AREA HERE
+                generated_content = generate_ai_explanation(
+                    content_to_use, 
+                    subject_area=subject_area, 
+                    level=level
+                )
+            elif action_type == 'improve_explanation':
+                generated_content = improve_explanation(content_to_use)
+            elif action_type == 'summarize_explanation':
+                generated_content = summarize_explanation(content_to_use)
+            elif action_type == 'generate_code':
+                # PASS LEVEL HERE
+                generated_content = generate_ai_code(content_to_use, language, level)
+            
+            logger.info(f"AI action '{action_type}' completed successfully with level: {level}")
+            
+            return Response({
+                'generated_content': generated_content,
+                'action_type': action_type,
+                'success': True,
+                'message': f'Content generated successfully ({level} level)'
+            })
+            
+        except Exception as e:
+            logger.error(f"AI action error: {str(e)}", exc_info=True)
+            return Response(
+                {
+                    'error': str(e),
+                    'success': False,
+                    'action_type': action_type
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+    # Keep the existing ai_action method for backward compatibility
+    # But update it to also work without topic_id if input is provided
     @action(detail=True, methods=['post'])
     def ai_action(self, request, pk=None):
-        """AI action - works BEFORE topic is saved"""
+        """
+        AI action - works BEFORE topic is saved (FIXED VERSION)
+        """
+        # Try to get topic if pk is provided
         topic = None
         if pk:
             try:
@@ -498,26 +610,40 @@ class TopicViewSet(viewsets.ModelViewSet):
                     chapter__note__user=request.user
                 )
             except ChapterTopic.DoesNotExist:
-                return Response(
-                    {'error': 'Topic not found or access denied'},
-                    status=status.HTTP_403_FORBIDDEN
-                )
+                # If topic doesn't exist but we have input, we can still proceed
+                pass
         
         action_type = request.data.get('action_type')
         input_content = request.data.get('input_content', '')
         
-        # FIX: Allow generation even without saved topic
-        if not input_content and topic:
-            input_content = topic.name
-        
+        # Determine what to use as input
         if not input_content:
+            if topic:
+                # Use topic name or existing content
+                if action_type == 'generate_code':
+                    input_content = topic.name
+                elif action_type in ['improve_explanation', 'summarize_explanation']:
+                    if topic.explanation:
+                        input_content = topic.explanation.content
+                    else:
+                        input_content = topic.name
+                else:  # generate_explanation
+                    input_content = topic.name
+            else:
+                return Response(
+                    {'error': 'Input content or topic is required', 'success': False},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+        
+        if not input_content or not input_content.strip():
             return Response(
-                {'error': 'Input content or topic name required'},
+                {'error': 'Cannot generate without input', 'success': False},
                 status=status.HTTP_400_BAD_REQUEST
             )
         
         try:
             generated_content = None
+            language = request.data.get('language', 'python')
             
             if action_type == 'generate_explanation':
                 generated_content = generate_ai_explanation(input_content)
@@ -526,20 +652,45 @@ class TopicViewSet(viewsets.ModelViewSet):
             elif action_type == 'summarize_explanation':
                 generated_content = summarize_explanation(input_content)
             elif action_type == 'generate_code':
-                language = request.data.get('language', 'python')
                 generated_content = generate_ai_code(input_content, language)
+            
+            # Optionally save to topic if it exists
+            if topic and action_type == 'generate_explanation':
+                # Auto-save generated explanation to topic
+                if not topic.explanation:
+                    from .models import TopicExplanation
+                    explanation = TopicExplanation.objects.create(content=generated_content)
+                    topic.explanation = explanation
+                    topic.save()
+            elif topic and action_type == 'generate_code':
+                # Auto-save generated code to topic
+                if not topic.code_snippet:
+                    from .models import TopicCodeSnippet
+                    code = TopicCodeSnippet.objects.create(
+                        language=language,
+                        code=generated_content
+                    )
+                    topic.code_snippet = code
+                    topic.save()
             
             return Response({
                 'generated_content': generated_content,
                 'action_type': action_type,
-                'success': True
+                'success': True,
+                'topic_id': topic.id if topic else None
             })
         except Exception as e:
-            logger.error(f"AI Action Error: {str(e)}")
+            logger.error(f"AI Action Error: {str(e)}", exc_info=True)
             return Response(
                 {'error': f'AI action failed: {str(e)}', 'success': False},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
+
+
+
+
+
+
 
     def create(self, request):
         """Create topic using TopicService"""
@@ -688,7 +839,7 @@ def extract_input_requirements(code, language):
 
 
 @api_view(['POST'])
-@permission_classes([AllowAny])
+@permission_classes([permissions.IsAuthenticated])  # FIX: Changed from AllowAny
 def execute_code(request):
     """Execute code with input support"""
     code = request.data.get('code', '')
@@ -1016,4 +1167,3 @@ class AIToolsViewSet(viewsets.ViewSet):
                 'success': False,
                 'error': 'History item not found or access denied'
             }, status=status.HTTP_403_FORBIDDEN)
-

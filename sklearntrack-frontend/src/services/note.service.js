@@ -205,10 +205,70 @@ exportNotePDF: async (id, noteTitle) => {
   },
 
   // AI action on topic
-  performAIAction: async (topicId, actionData) => {
-    const response = await api.post(`/api/topics/${topicId}/ai_action/`, actionData);
+ 
+ // Standalone AI action (works without saved topic)
+performStandaloneAIAction: async (actionData) => {
+  try {
+    const response = await api.post('/api/topics/ai-action-standalone/', actionData);
+    
+    if (!response.data.success) {
+      throw new Error(response.data.error || 'AI action failed');
+    }
+    
     return response.data;
-  },
+  } catch (error) {
+    console.error('Standalone AI action error:', error);
+    
+    // Provide helpful error messages
+    if (error.response?.status === 400) {
+      throw new Error(error.response.data.error || 'Invalid request');
+    } else if (error.response?.status === 500) {
+      throw new Error('AI service error. Please try again.');
+    } else if (error.message === 'Network Error') {
+      throw new Error('Network error. Please check your connection.');
+    }
+    
+    throw new Error(error.response?.data?.error || error.message || 'AI action failed');
+  }
+},
+
+// Also update the existing performAIAction to be more robust:
+performAIAction: async (topicId, actionData) => {
+  try {
+    // If no topicId, use standalone action
+    if (!topicId) {
+      return await noteService.performStandaloneAIAction(actionData);
+    }
+    
+    const response = await api.post(`/api/topics/${topicId}/ai_action/`, actionData);
+    
+    if (!response.data.success) {
+      throw new Error(response.data.error || 'AI action failed');
+    }
+    
+    return response.data;
+  } catch (error) {
+    console.error('AI action error:', error);
+    
+    // Better error handling
+    if (error.response?.status === 404) {
+      // Topic not found, try standalone
+      return await noteService.performStandaloneAIAction(actionData);
+    } else if (error.response?.status === 400) {
+      throw new Error(error.response.data.error || 'Invalid request');
+    } else if (error.response?.status === 500) {
+      throw new Error('AI service error. Please try again.');
+    }
+    
+    throw new Error(error.response?.data?.error || error.message || 'AI action failed');
+  }
+},
+
+
+
+
+
+
 
   // ========================================================================
   // VERSION HISTORY

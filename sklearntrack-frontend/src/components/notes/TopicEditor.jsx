@@ -58,6 +58,7 @@ const TopicEditor = ({ topic, onSave, onCancel, onAIAction }) => {
   const [showInputModal, setShowInputModal] = useState(false);
   const [stdinValue, setStdinValue] = useState('');
   const [autoDetectsInput, setAutoDetectsInput] = useState(false);
+  const [learningLevel, setLearningLevel] = useState('beginner');
 
   const [formData, setFormData] = useState({
     name: topic?.name || '',
@@ -252,39 +253,99 @@ const TopicEditor = ({ topic, onSave, onCancel, onAIAction }) => {
     await executeRun({ stdin: stdinValue });
   };
 
-  const handleAI = async (action) => {
-    setError(null);
-    setAiLoading(action);
-    try {
-      let input = '';
-      if (action === 'generate_code') {
-        input = formData.name;
-      } else {
-        input = formData.explanation || formData.name;
+// In TopicEditor.jsx - Update the handleAI function
+const handleAI = async (action) => {
+  setError(null);
+  setAiLoading(action);
+  
+  try {
+    let input = '';
+    let requestData = {
+      action_type: action,
+      level: learningLevel,  // This should already be there
+      subject_area: 'programming'  // Add this
+    };
+    
+    // Determine input based on action type
+    if (action === 'generate_code') {
+      input = formData.name.trim();
+      if (!input) {
+        throw new Error('Please enter a topic name first');
       }
-
-      const result = await onAIAction(action, input, formData.code.language);
+      requestData.topic_name = input;
+      requestData.language = formData.code.language;
+    } else if (action === 'generate_explanation') {
+      input = formData.name.trim();
+      if (!input) {
+        throw new Error('Please enter a topic name first');
+      }
+      requestData.topic_name = input;
       
-      if (action === 'generate_code') {
-        setFormData(prev => ({
-          ...prev,
-          code: { ...prev.code, content: result }
-        }));
-      } else {
-        // AI returns markdown, convert to HTML for Quill editor
-        setFormData(prev => ({
-          ...prev,
-          explanation: result
-        }));
+      // Auto-detect subject area from topic name
+      const programmingKeywords = [
+        'function', 'class', 'loop', 'array', 'variable', 'algorithm', 
+        'code', 'programming', 'python', 'javascript', 'java', 'c++',
+        'syntax', 'method', 'object', 'string', 'integer', 'boolean',
+        'recursion', 'sorting', 'database', 'api', 'framework'
+      ];
+      const isProgramming = programmingKeywords.some(kw => 
+        input.toLowerCase().includes(kw)
+      );
+      requestData.subject_area = isProgramming ? 'programming' : 'general';
+      
+    } else if (action === 'improve_explanation' || action === 'summarize_explanation') {
+      input = formData.explanation.trim();
+      if (!input || input.length < 20) {
+        throw new Error('Please add some content to improve/summarize');
       }
-    } catch (error) {
-      console.error('AI action failed:', error);
-      const errorMessage = error.response?.data?.error || error.message || 'AI action failed';
-      setError(errorMessage);
-    } finally {
-      setAiLoading(null);
+      requestData.input_content = input;
     }
-  };
+    
+    // Use standalone AI action endpoint (no topic ID required)
+    const result = await noteService.performStandaloneAIAction(requestData);
+    
+    // Update form with generated content
+    if (action === 'generate_code') {
+      setFormData(prev => ({
+        ...prev,
+        code: { 
+          ...prev.code, 
+          content: result.generated_content 
+        }
+      }));
+      showToast(`Code generated successfully (${learningLevel} level)!`, 'success');
+    } else {
+      // For explanations (generate, improve, summarize)
+      setFormData(prev => ({
+        ...prev,
+        explanation: result.generated_content
+      }));
+      
+      const messages = {
+        'generate_explanation': `Explanation generated successfully (${learningLevel} level)!`,
+        'improve_explanation': 'Explanation improved successfully!',
+        'summarize_explanation': 'Summary generated successfully!'
+      };
+      showToast(messages[action] || 'Content generated!', 'success');
+    }
+    
+  } catch (error) {
+    console.error('AI action failed:', error);
+    const errorMessage = error.response?.data?.error || error.message || 'AI action failed';
+    setError(errorMessage);
+    showToast(errorMessage, 'error');
+  } finally {
+    setAiLoading(null);
+  }
+};
+// Add this helper function for toast notifications
+const showToast = (message, type = 'success') => {
+  // You can use your existing toast system or add this simple one:
+  const toastEvent = new CustomEvent('show-toast', {
+    detail: { message, type }
+  });
+  window.dispatchEvent(toastEvent);
+};
 
   const clearCodeOutput = () => {
     setCodeOutput('');
@@ -412,6 +473,122 @@ const TopicEditor = ({ topic, onSave, onCancel, onAIAction }) => {
           className="w-full px-4 py-2 border dark:border-gray-600 rounded-lg bg-white dark:bg-gray-900 focus:ring-2 focus:ring-blue-500"
         />
       </div>
+      {/* Learning Level Selector - NEW */}
+<div className="border dark:border-gray-700 rounded-lg p-4 bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-900/20 dark:to-indigo-900/20">
+  <label className="flex text-sm font-medium mb-3 items-center gap-2">
+    <span className="text-blue-700 dark:text-blue-300 text-base font-semibold">
+      🎓 Learning Level
+    </span>
+    <span className="text-xs text-gray-600 dark:text-gray-400">
+      (Choose your level for AI content generation)
+    </span>
+  </label>
+  
+  <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+    {[
+      { 
+        value: 'beginner', 
+        icon: '🌱', 
+        label: 'Beginner', 
+        desc: 'Simple & Easy', 
+        color: 'green',
+        detail: 'Perfect for those just starting out'
+      },
+      { 
+        value: 'intermediate', 
+        icon: '📚', 
+        label: 'Intermediate', 
+        desc: 'More Details', 
+        color: 'blue',
+        detail: 'Good depth for those who know basics'
+      },
+      { 
+        value: 'advanced', 
+        icon: '🚀', 
+        label: 'Advanced', 
+        desc: 'Deep Dive', 
+        color: 'purple',
+        detail: 'Technical details and optimization'
+      },
+      { 
+        value: 'expert', 
+        icon: '⭐', 
+        label: 'Expert', 
+        desc: 'Production', 
+        color: 'red',
+        detail: 'Architecture and mastery level'
+      }
+    ].map(level => (
+      <button
+        key={level.value}
+        type="button"
+        onClick={() => setLearningLevel(level.value)}
+        className={`p-3 rounded-lg border-2 transition-all transform hover:scale-105 ${
+          learningLevel === level.value
+            ? `border-${level.color}-600 bg-${level.color}-100 dark:bg-${level.color}-900/40 shadow-md`
+            : 'border-gray-300 dark:border-gray-600 hover:border-gray-400 bg-white dark:bg-gray-800'
+        }`}
+      >
+        <div className="text-2xl mb-1">{level.icon}</div>
+        <div className="font-semibold text-sm">{level.label}</div>
+        <div className="text-xs text-gray-600 dark:text-gray-400 mt-1">{level.desc}</div>
+      </button>
+    ))}
+  </div>
+  
+  {/* Level Description - Shows info about selected level */}
+  <div className="mt-3 p-3 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
+    {learningLevel === 'beginner' && (
+      <div className="flex items-start gap-2">
+        <span className="text-2xl">🌱</span>
+        <div>
+          <p className="font-semibold text-green-700 dark:text-green-300">Beginner Level</p>
+          <p className="text-sm text-gray-700 dark:text-gray-300 mt-1">
+            Simple explanations with basic examples. Easy to understand for those just starting out.
+            Content is short, clear, and fun to learn!
+          </p>
+        </div>
+      </div>
+    )}
+    {learningLevel === 'intermediate' && (
+      <div className="flex items-start gap-2">
+        <span className="text-2xl">📚</span>
+        <div>
+          <p className="font-semibold text-blue-700 dark:text-blue-300">Intermediate Level</p>
+          <p className="text-sm text-gray-700 dark:text-gray-300 mt-1">
+            More detailed explanations with practical examples. Good for those who know programming basics
+            and want deeper understanding.
+          </p>
+        </div>
+      </div>
+    )}
+    {learningLevel === 'advanced' && (
+      <div className="flex items-start gap-2">
+        <span className="text-2xl">🚀</span>
+        <div>
+          <p className="font-semibold text-purple-700 dark:text-purple-300">Advanced Level</p>
+          <p className="text-sm text-gray-700 dark:text-gray-300 mt-1">
+            Deep technical details, performance optimization, and edge cases. For experienced
+            developers who want comprehensive knowledge.
+          </p>
+        </div>
+      </div>
+    )}
+    {learningLevel === 'expert' && (
+      <div className="flex items-start gap-2">
+        <span className="text-2xl">⭐</span>
+        <div>
+          <p className="font-semibold text-red-700 dark:text-red-300">Expert Level</p>
+          <p className="text-sm text-gray-700 dark:text-gray-300 mt-1">
+            Production-grade knowledge with architecture, scalability, and industry best practices.
+            For senior/principal engineers.
+          </p>
+        </div>
+      </div>
+    )}
+  </div>
+</div>
+
 
       {/* Explanation Section with Rich Text Editor */}
       <div className="border dark:border-gray-700 rounded-lg p-4">
@@ -421,18 +598,18 @@ const TopicEditor = ({ topic, onSave, onCancel, onAIAction }) => {
             Explanation
           </label>
           <div className="flex gap-2">
-            <button
-              onClick={() => handleAI('generate_explanation')}
-              disabled={aiLoading}
-              className="flex items-center gap-1 px-3 py-1 text-xs bg-purple-100 text-purple-700 rounded hover:bg-purple-200 disabled:opacity-50"
-            >
-              {aiLoading === 'generate_explanation' ? (
-                <Loader size={14} className="animate-spin" />
-              ) : (
-                <Sparkles size={14} />
-              )}
-              Generate
-            </button>
+          <button
+            onClick={() => handleAI('generate_explanation')}
+            disabled={aiLoading || !formData.name.trim()}
+            className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-purple-600 to-blue-600 text-white rounded-lg hover:from-purple-700 hover:to-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+          >
+            {aiLoading === 'generate_explanation' ? (
+              <Loader className="w-4 h-4 animate-spin" />
+            ) : (
+              <Sparkles className="w-4 h-4" />
+            )}
+            <span>Generate ({learningLevel})</span>
+          </button>
             <button
               onClick={() => handleAI('improve_explanation')}
               disabled={aiLoading || !formData.explanation}

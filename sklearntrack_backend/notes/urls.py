@@ -1,4 +1,4 @@
-# FILE: notes/urls.py - UPDATE with AI Tools routes
+# FILE: notes/urls.py - ADD STANDALONE AI ROUTE
 
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
@@ -11,12 +11,16 @@ router.register(r'notes', NoteViewSet, basename='note')
 router.register(r'chapters', ChapterViewSet, basename='chapter')
 router.register(r'topics', TopicViewSet, basename='topic')
 router.register(r'shares', NoteShareViewSet, basename='share')
-router.register(r'ai-tools', AIToolsViewSet, basename='ai-tools')  # NEW
+router.register(r'ai-tools', AIToolsViewSet, basename='ai-tools')
 
 urlpatterns = [
-    # Put the callback URL BEFORE the router includes
+    # Standalone routes (MUST come before router)
     path('notes/google-callback/', GoogleOAuthCallbackView.as_view(), name='google_callback'),
-    # Put run_code BEFORE the router includes
     path('run_code/', execute_code, name='run_code'),
+    
+    # NEW: Standalone AI action route
+    path('topics/ai-action-standalone/', TopicViewSet.as_view({'post': 'ai_action_standalone'}), name='topic-ai-standalone'),
+    
+    # Router URLs
     path('', include(router.urls)),
 ]
