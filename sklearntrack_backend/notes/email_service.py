@@ -1,11 +1,12 @@
-# FILE: notes/email_service.py - IMPROVED WITH 403 HANDLING
+# FILE: notes/email_service.py - PRODUCTION FIX WITH ASYNC SENDING
 # ============================================================================
-# This version handles SendGrid 403 errors gracefully and works better in dev
+# This version prevents worker timeouts and handles SendGrid properly
 # ============================================================================
 
 from django.conf import settings
 from django.core.mail import EmailMultiAlternatives, get_connection
 import logging
+import threading
 
 logger = logging.getLogger(__name__)
 
@@ -13,7 +14,7 @@ logger = logging.getLogger(__name__)
 class EmailService:
     """
     Unified email service that handles both SendGrid and SMTP
-    with proper error handling for development and production.
+    with async sending to prevent worker timeouts
     """
     
     @staticmethod
@@ -23,13 +24,17 @@ class EmailService:
         text_content,
         html_content=None,
         from_email=None,
-        reply_to=None
+        reply_to=None,
+        async_send=True  # NEW: Send asynchronously by default in production
     ):
         """
         Send email using best available method
         
+        Args:
+            async_send: If True, sends email in background thread (prevents timeouts)
+        
         Returns:
-            bool: True if email sent successfully
+            bool: True if email queued/sent successfully
         """
         try:
             # Validate inputs
@@ -56,11 +61,38 @@ class EmailService:
                     from_email=from_email
                 )
             
+            # Production mode - use async sending to prevent timeouts
+            if async_send:
+                logger.info("   Method: Async (Background Thread)")
+                thread = threading.Thread(
+                    target=EmailService._send_email_sync,
+                    args=(to_email, subject, text_content, html_content, from_email, reply_to)
+                )
+                thread.daemon = True
+                thread.start()
+                logger.info("✅ Email queued for background sending")
+                return True
+            else:
+                # Synchronous sending (not recommended in production)
+                return EmailService._send_email_sync(
+                    to_email, subject, text_content, html_content, from_email, reply_to
+                )
+                
+        except Exception as e:
+            logger.error(f"❌ Email sending failed: {str(e)}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return False
+    
+    @staticmethod
+    def _send_email_sync(to_email, subject, text_content, html_content, from_email, reply_to=None):
+        """Internal method for synchronous email sending"""
+        try:
             # Production mode - try SendGrid first
             sendgrid_api_key = getattr(settings, 'SENDGRID_API_KEY', '').strip()
             
             if sendgrid_api_key and len(sendgrid_api_key) > 20:
-                logger.info("   Method: SendGrid API")
+                logger.info("   Using: SendGrid API")
                 success = EmailService._send_via_sendgrid_api(
                     to_email=to_email,
                     subject=subject,
@@ -70,33 +102,24 @@ class EmailService:
                     api_key=sendgrid_api_key
                 )
                 
-                # If SendGrid fails with 403, fall back to console in development
-                if not success and settings.DEBUG:
-                    logger.warning("⚠️  SendGrid failed, falling back to console")
-                    return EmailService._send_via_console(
-                        to_email=to_email,
-                        subject=subject,
-                        text_content=text_content,
-                        html_content=html_content,
-                        from_email=from_email
-                    )
-                
-                return success
-            else:
-                logger.info("   Method: SMTP")
-                return EmailService._send_via_smtp(
-                    to_email=to_email,
-                    subject=subject,
-                    text_content=text_content,
-                    html_content=html_content,
-                    from_email=from_email,
-                    reply_to=reply_to
-                )
-                
+                if success:
+                    return True
+                else:
+                    logger.warning("⚠️  SendGrid failed, trying SMTP fallback")
+            
+            # Fallback to SMTP
+            logger.info("   Using: SMTP")
+            return EmailService._send_via_smtp(
+                to_email=to_email,
+                subject=subject,
+                text_content=text_content,
+                html_content=html_content,
+                from_email=from_email,
+                reply_to=reply_to
+            )
+            
         except Exception as e:
-            logger.error(f"❌ Email sending failed: {str(e)}")
-            import traceback
-            logger.error(traceback.format_exc())
+            logger.error(f"❌ Sync email sending failed: {str(e)}")
             return False
     
     @staticmethod
@@ -133,7 +156,7 @@ class EmailService:
     @staticmethod
     def _send_via_sendgrid_api(to_email, subject, text_content, html_content, from_email, api_key):
         """
-        Send email using SendGrid API
+        Send email using SendGrid API with timeout protection
         """
         try:
             # Import SendGrid
@@ -161,10 +184,10 @@ class EmailService:
                 html_content=Content("text/html", html_content) if html_content else None
             )
             
-            # Send with timeout protection
+            # Send with SHORT timeout to prevent worker hangs
             import socket
             original_timeout = socket.getdefaulttimeout()
-            socket.setdefaulttimeout(20)
+            socket.setdefaulttimeout(10)  # 10 second timeout
             
             try:
                 response = sg.send(message)
@@ -177,41 +200,16 @@ class EmailService:
                     
                 elif response.status_code == 401:
                     logger.error("❌ SendGrid 401: Invalid API key")
-                    logger.error("   Check your SENDGRID_API_KEY environment variable")
                     return False
                     
                 elif response.status_code == 403:
-                    # Parse error details
-                    try:
-                        error_body = response.body.decode('utf-8') if response.body else "No details"
-                        logger.error(f"❌ SendGrid 403 Forbidden: {error_body}")
-                        
-                        logger.error("")
-                        logger.error("🔧 HOW TO FIX SendGrid 403 Error:")
-                        logger.error("")
-                        logger.error("   Your sender email is NOT VERIFIED in SendGrid!")
-                        logger.error("")
-                        logger.error("   Step 1: Go to SendGrid Dashboard")
-                        logger.error("   https://app.sendgrid.com/settings/sender_auth")
-                        logger.error("")
-                        logger.error("   Step 2: Click 'Verify a Single Sender'")
-                        logger.error("")
-                        logger.error(f"   Step 3: Add and verify: {from_email}")
-                        logger.error("")
-                        logger.error("   Step 4: Check your email and click verification link")
-                        logger.error("")
-                        logger.error("   Step 5: Wait 5-10 minutes for verification to activate")
-                        logger.error("")
-                        logger.error("   OR for development: Disable SendGrid in settings.py")
-                        logger.error("")
-                        
-                    except:
-                        logger.error("   Unable to parse error details")
-                    
-                    return False
-                    
-                elif response.status_code == 429:
-                    logger.error("❌ SendGrid 429: Rate limit exceeded")
+                    error_body = response.body.decode('utf-8') if response.body else "No details"
+                    logger.error(f"❌ SendGrid 403 Forbidden: {error_body}")
+                    logger.error("")
+                    logger.error("🔧 SENDER EMAIL NOT VERIFIED IN SENDGRID!")
+                    logger.error(f"   Verify: {from_email}")
+                    logger.error("   Go to: https://app.sendgrid.com/settings/sender_auth")
+                    logger.error("")
                     return False
                     
                 else:
@@ -225,24 +223,12 @@ class EmailService:
         except Exception as e:
             error_msg = str(e)
             logger.error(f"❌ SendGrid API Exception: {error_msg}")
-            
-            if "403" in error_msg or "Forbidden" in error_msg:
-                logger.error("")
-                logger.error("🔧 QUICK FIX FOR DEVELOPMENT:")
-                logger.error("   Add to your .env file:")
-                logger.error("   SENDGRID_API_KEY=")
-                logger.error("")
-                logger.error("   Or in settings.py, add:")
-                logger.error("   if DEBUG:")
-                logger.error("       SENDGRID_API_KEY = ''")
-                logger.error("")
-            
             return False
     
     @staticmethod
     def _send_via_smtp(to_email, subject, text_content, html_content, from_email, reply_to=None):
         """
-        Send email using SMTP
+        Send email using SMTP with timeout protection
         """
         try:
             # Check SMTP configuration
@@ -250,24 +236,14 @@ class EmailService:
                 logger.error("❌ EMAIL_HOST not configured")
                 return False
             
-            # Test connection
-            try:
-                connection = get_connection(timeout=5)
-                connection.open()
-                logger.info(f"✅ SMTP connection successful: {settings.EMAIL_HOST}:{settings.EMAIL_PORT}")
-                connection.close()
-            except Exception as conn_error:
-                logger.error(f"❌ SMTP connection failed: {str(conn_error)}")
-                return False
-            
-            # Create email message
+            # Create email message with SHORT timeout
             email = EmailMultiAlternatives(
                 subject=subject,
                 body=text_content,
                 from_email=from_email,
                 to=[to_email],
                 reply_to=[reply_to or from_email],
-                connection=get_connection(timeout=15)
+                connection=get_connection(timeout=10)  # 10 second timeout
             )
             
             if html_content:
