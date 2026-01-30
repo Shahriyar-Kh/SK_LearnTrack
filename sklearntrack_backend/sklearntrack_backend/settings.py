@@ -227,76 +227,147 @@ CORS_ALLOW_HEADERS = [
 CORS_PREFLIGHT_MAX_AGE = 86400
 
 
-# =============== EMAIL CONFIGURATION - PRODUCTION FIX =================
+# ==================== EMAIL CONFIGURATION ====================
+
 # Frontend URL for email links
-FRONTEND_URL = config('FRONTEND_URL', default='http://localhost:3000')
+FRONTEND_URL = config('FRONTEND_URL', default='http://localhost:3000' if DEBUG else 'https://sk-learntrack.vercel.app')
 
-# Email Configuration - Optimized for Production
-EMAIL_BACKEND = config('EMAIL_BACKEND', default='django.core.mail.backends.smtp.EmailBackend')
+# Get SendGrid API Key (Production - Preferred Method)
+SENDGRID_API_KEY = config('SENDGRID_API_KEY', default='').strip()
 
-# Get all email configuration
+# SMTP Configuration (Fallback or Development)
 EMAIL_HOST = config('EMAIL_HOST', default='')
+EMAIL_PORT = config('EMAIL_PORT', default=587, cast=int)
 EMAIL_HOST_USER = config('EMAIL_HOST_USER', default='')
 EMAIL_HOST_PASSWORD = config('EMAIL_HOST_PASSWORD', default='')
-EMAIL_PORT = config('EMAIL_PORT', default=587, cast=int)
 EMAIL_USE_TLS = config('EMAIL_USE_TLS', default=True, cast=bool)
 EMAIL_USE_SSL = config('EMAIL_USE_SSL', default=False, cast=bool)
-EMAIL_TIMEOUT = 30  # 30 seconds timeout
-DEFAULT_FROM_EMAIL = config('DEFAULT_FROM_EMAIL', default=EMAIL_HOST_USER or 'noreply@sklearntrack.com')
+EMAIL_TIMEOUT = 30
 
-# Check for SendGrid (Render recommended)
-SENDGRID_API_KEY = config('SENDGRID_API_KEY', default='')
-MAILGUN_API_KEY = config('MAILGUN_API_KEY', default='')
+# Default from email
+DEFAULT_FROM_EMAIL = config('DEFAULT_FROM_EMAIL', default='noreply@sklearntrack.com')
 
-# 🔥 FIX: Use SendGrid if available (Render's recommended email service)
-if SENDGRID_API_KEY and not DEBUG:
-    # SendGrid configuration for Render
-    EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
-    EMAIL_HOST = 'smtp.sendgrid.net'
-    EMAIL_PORT = 587
-    EMAIL_USE_TLS = True
-    EMAIL_HOST_USER = 'apikey'  # This is fixed for SendGrid
-    EMAIL_HOST_PASSWORD = SENDGRID_API_KEY
+# ==================== EMAIL BACKEND SELECTION ====================
+
+if DEBUG:
+    # DEVELOPMENT MODE
+    # Use console backend to print emails to console
+    EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
+    logger.info("=" * 60)
+    logger.info("📧 EMAIL CONFIGURATION: Console Backend (Development)")
+    logger.info("   Emails will be printed to console")
+    logger.info("=" * 60)
     
-    logger.info("=" * 60)
-    logger.info("✅ EMAIL CONFIGURATION: SendGrid SMTP (Production)")
-    logger.info("   Provider: SendGrid")
-    logger.info(f"   Host: {EMAIL_HOST}")
-    logger.info(f"   Port: {EMAIL_PORT}")
-    logger.info("=" * 60)
-
-
 else:
-    # Development/fallback configuration
-    if DEBUG:
-        EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
-        logger.warning("⚠️  EMAIL: Console backend (Development Mode)")
+    # PRODUCTION MODE
+    # Priority 1: SendGrid API (if configured)
+    if SENDGRID_API_KEY and len(SENDGRID_API_KEY) > 20:
+        # Validate SendGrid API key format
+        if not SENDGRID_API_KEY.startswith('SG.'):
+            logger.warning("⚠️  SendGrid API key doesn't start with 'SG.' - might be invalid")
+        
+        # Configure for SendGrid SMTP
+        EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
+        EMAIL_HOST = 'smtp.sendgrid.net'
+        EMAIL_PORT = 587
+        EMAIL_USE_TLS = True
+        EMAIL_USE_SSL = False
+        EMAIL_HOST_USER = 'apikey'  # This is the literal string 'apikey' for SendGrid
+        EMAIL_HOST_PASSWORD = SENDGRID_API_KEY
+        
+        # Validate DEFAULT_FROM_EMAIL format
+        import re
+        email_regex = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+        if not re.match(email_regex, DEFAULT_FROM_EMAIL):
+            logger.error(f"❌ Invalid DEFAULT_FROM_EMAIL format: {DEFAULT_FROM_EMAIL}")
+            logger.warning(f"   Using fallback email")
+            DEFAULT_FROM_EMAIL = 'noreply@sklearntrack.com'
+        
+        logger.info("=" * 60)
+        logger.info("📧 EMAIL CONFIGURATION: SendGrid SMTP (Production)")
+        logger.info(f"   Provider: SendGrid")
+        logger.info(f"   Host: {EMAIL_HOST}")
+        logger.info(f"   Port: {EMAIL_PORT}")
+        logger.info(f"   From Email: {DEFAULT_FROM_EMAIL}")
+        logger.info(f"   API Key: {SENDGRID_API_KEY[:10]}...{SENDGRID_API_KEY[-4:]}")
+        logger.info("   ")
+        logger.info("   ⚠️  IMPORTANT: Verify sender in SendGrid")
+        logger.info(f"   Go to: https://app.sendgrid.com/settings/sender_auth")
+        logger.info(f"   Verify: {DEFAULT_FROM_EMAIL}")
+        logger.info("=" * 60)
+        
+    # Priority 2: Standard SMTP (if configured)
+    elif EMAIL_HOST and EMAIL_PORT:
+        EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
+        
+        logger.info("=" * 60)
+        logger.info("📧 EMAIL CONFIGURATION: SMTP (Production)")
+        logger.info(f"   Host: {EMAIL_HOST}")
+        logger.info(f"   Port: {EMAIL_PORT}")
+        logger.info(f"   From Email: {DEFAULT_FROM_EMAIL}")
+        logger.info(f"   TLS: {EMAIL_USE_TLS}")
+        logger.info(f"   SSL: {EMAIL_USE_SSL}")
+        logger.info("=" * 60)
+        
     else:
-        # In production without email config, use dummy backend but log warnings
+        # No email configured - use dummy backend
         EMAIL_BACKEND = 'django.core.mail.backends.dummy.EmailBackend'
-        logger.error("❌ EMAIL CONFIGURATION: No email provider configured!")
-        logger.error("   Emails will NOT be sent in production!")
-        logger.error("")
-        logger.error("   Configure one of these in Render environment:")
-        logger.error("   1. SENDGRID_API_KEY (Recommended for Render)")
-        logger.error("   2. MAILGUN_API_KEY")
-        logger.error("   3. Standard SMTP (EMAIL_HOST, EMAIL_HOST_USER, EMAIL_HOST_PASSWORD)")
+        
+        logger.error("=" * 60)
+        logger.error("❌ EMAIL NOT CONFIGURED IN PRODUCTION!")
+        logger.error("   No SendGrid API key or SMTP settings found")
+        logger.error("   ")
+        logger.error("   TO FIX - Set one of these in environment variables:")
+        logger.error("   ")
+        logger.error("   Option 1 (Recommended): SendGrid")
+        logger.error("   SENDGRID_API_KEY=SG.xxxxx")
+        logger.error("   DEFAULT_FROM_EMAIL=noreply@yourdomain.com")
+        logger.error("   ")
+        logger.error("   Option 2: SMTP Server")
+        logger.error("   EMAIL_HOST=smtp.gmail.com")
+        logger.error("   EMAIL_PORT=587")
+        logger.error("   EMAIL_HOST_USER=your@email.com")
+        logger.error("   EMAIL_HOST_PASSWORD=yourpassword")
+        logger.error("   EMAIL_USE_TLS=True")
+        logger.error("   DEFAULT_FROM_EMAIL=your@email.com")
         logger.error("=" * 60)
 
 # Email subject prefix
 EMAIL_SUBJECT_PREFIX = '[SK-LearnTrack] '
 
-# Connection pooling for better performance
-EMAIL_CONNECTION_TIMEOUT = 10  # Reduced from 30s
-EMAIL_SSL_KEYFILE = None
-EMAIL_SSL_CERTFILE = None
+# ==================== SENDGRID VERIFICATION INSTRUCTIONS ====================
 
-# Email retry configuration
+if not DEBUG and SENDGRID_API_KEY:
+    logger.info("")
+    logger.info("🔐 SENDGRID SETUP CHECKLIST:")
+    logger.info("   ")
+    logger.info("   1. VERIFY YOUR SENDER EMAIL:")
+    logger.info("      a) Go to: https://app.sendgrid.com/settings/sender_auth")
+    logger.info("      b) Click 'Verify a Single Sender'")
+    logger.info(f"      c) Add and verify: {DEFAULT_FROM_EMAIL}")
+    logger.info("      d) Check your email and click verification link")
+    logger.info("   ")
+    logger.info("   2. CHECK API KEY PERMISSIONS:")
+    logger.info("      a) Go to: https://app.sendgrid.com/settings/api_keys")
+    logger.info("      b) Find your API key")
+    logger.info("      c) Ensure 'Mail Send' permission is enabled")
+    logger.info("   ")
+    logger.info("   3. TEST EMAIL:")
+    logger.info("      Run: python manage.py shell")
+    logger.info("      >>> from django.core.mail import send_mail")
+    logger.info(f"      >>> send_mail('Test', 'Body', '{DEFAULT_FROM_EMAIL}', ['test@example.com'])")
+    logger.info("   ")
+    logger.info("=" * 60)
+
+# ==================== EMAIL RETRY CONFIGURATION ====================
+
+# Configuration for email retries (used by EmailService)
 MAX_EMAIL_RETRIES = 3
 EMAIL_RETRY_DELAY = 2  # seconds
 
+# ==================== END EMAIL CONFIGURATION ====================
 
-# =============== END EMAIL CONFIGURATION =================
+
 # # Celery Configuration
 # CELERY_BROKER_URL = config('CELERY_BROKER_URL', default='redis://localhost:6379/0')
 # CELERY_RESULT_BACKEND = config('CELERY_RESULT_BACKEND', default='redis://localhost:6379/0')
